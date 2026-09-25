@@ -136,8 +136,9 @@ def _get(url: str, **kwargs) -> requests.Response:
     if host in _DEAD_HOSTS:
         # 같은 실행에서 이미 두 번 연속 접속 실패한 호스트는 바로 건너뛴다
         raise ConnectionError(f"{host} 접속 불가")
+    headers = kwargs.pop("headers", UA)
     try:
-        r = requests.get(url, headers=UA, timeout=(10, HTTP_TIMEOUT), **kwargs)
+        r = requests.get(url, headers=headers, timeout=(10, HTTP_TIMEOUT), **kwargs)
     except (requests.ConnectionError, requests.Timeout) as e:
         _HOST_FAILS[host] = _HOST_FAILS.get(host, 0) + 1
         if _HOST_FAILS[host] >= 2:
@@ -152,7 +153,8 @@ _HOST_FAILS: dict[str, int] = {}
 
 
 def fetch_fred(series_id: str) -> pd.Series:
-    r = _get("https://fred.stlouisfed.org/graph/fredgraph.csv", params={"id": series_id})
+    # FRED는 브라우저형 User-Agent 요청에 응답을 주지 않고 시간 초과되므로 requests 기본 UA로 요청한다
+    r = _get("https://fred.stlouisfed.org/graph/fredgraph.csv", params={"id": series_id}, headers={})
     df = pd.read_csv(io.StringIO(r.text))
     date_col = df.columns[0]  # observation_date (구 형식: DATE)
     s = pd.to_numeric(df[series_id], errors="coerce")  # 결측치 "." 처리
