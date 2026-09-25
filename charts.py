@@ -1,0 +1,667 @@
+"""Owl Capital 차트 브리핑.
+
+실행하면 6개 차트를 PNG로 그려 텔레그램 sendPhoto로 순서대로 보낸다.
+받은 시계열은 data/ 폴더에 CSV로 쌓고(새 날짜만 추가), 변경분을 git에 커밋·푸시한다.
+
+환경변수
+  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰 (루틴 프롬프트의 [전송 설정] 값)
+  TELEGRAM_CHAT_ID     텔레그램 채팅 ID
+  CHARTS_DATA_BRANCH   data/ 커밋을 푸시할 브랜치 (기본: 원격 기본 브랜치)
+
+옵션
+  --dry-run    텔레그램 전송 없이 out/ 폴더에 PNG와 캡션만 저장
+  --no-commit  data/ 변경분 git 커밋·푸시 생략
+  --only N,N   지정한 번호의 차트만 실행 (예: --only 1,5)
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import io
+import os
+import subprocess
+import sys
+import time
+import traceback
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+OUT_DIR = ROOT / "out"
+
+
+def _ensure_packages() -> None:
+    try:
+        import matplotlib, pandas, requests, yfinance  # noqa: F401
+    except ImportError:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements.txt")],
+            check=False,
+        )
+
+
+_ensure_packages()
+
+import matplotlib  # noqa: E402
+
+matplotlib.use("Agg")
+import matplotlib.dates as mdates  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
+import pandas as pd  # noqa: E402
+import requests  # noqa: E402
+
+KST = dt.timezone(dt.timedelta(hours=9))
+TODAY = dt.datetime.now(KST).date()
+YEAR_START = dt.date(TODAY.year, 1, 1)
+HTTP_TIMEOUT = 20
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
+
+# 선 색상: 1 빨강 실선, 2 검정, 3 주황, 4 노랑
+COLORS = ["#D62728", "#111111", "#FF8C00", "#F2C200"]
+LINE_WIDTH = 2.0
+
+
+# ---------------------------------------------------------------------------
+# 폰트
+# ---------------------------------------------------------------------------
+
+KOREAN_FONTS = ["NanumGothic", "NanumBarunGothic", "Noto Sans CJK KR", "Noto Sans KR", "UnDotum"]
+
+
+def setup_korean_font() -> str | None:
+    def find() -> str | None:
+        names = {f.name for f in font_manager.fontManager.ttflist}
+        return next((n for n in KOREAN_FONTS if n in names), None)
+
+    name = find()
+    if name is None:
+        # 폰트가 없으면 설치 후 캐시 재구성
+        cmd = "apt-get install -y -q fonts-nanum >/dev/null 2>&1 || (apt-get update -q >/dev/null 2>&1 && apt-get install -y -q fonts-nanum >/dev/null 2>&1)"
+        subprocess.run(cmd, shell=True, check=False)
+        for path in Path("/usr/share/fonts").rglob("Nanum*.ttf"):
+            font_manager.fontManager.addfont(str(path))
+        name = find()
+    if name:
+        plt.rcParams["font.family"] = name
+    else:
+        print("[경고] 한글 폰트를 찾지 못했습니다. 글자가 깨질 수 있습니다.", file=sys.stderr)
+    plt.rcParams["axes.unicode_minus"] = False
+    return name
+
+
+# ---------------------------------------------------------------------------
+# 데이터 수집 (출처별 재시도 1회)
+# ---------------------------------------------------------------------------
+
+
+class SourceError(Exception):
+    pass
+
+
+def with_retry(fn, *args, **kwargs):
+    """외부 출처 호출을 최대 2회(재시도 1회) 시도한다."""
+    last: Exception | None = None
+    for attempt in range(2):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt == 0:
+                time.sleep(2)
+    raise SourceError(_short(last))
+
+
+def _short(e: Exception | None) -> str:
+    if e is None:
+        return "알 수 없는 오류"
+    if isinstance(e, requests.exceptions.ProxyError):
+        msg = "네트워크 정책 차단(프록시 403)"
+    elif isinstance(e, requests.Timeout):
+        msg = "응답 시간 초과"
+    elif isinstance(e, (SourceError, ConnectionError)):
+        msg = str(e)
+    else:
+        msg = f"{type(e).__name__}: {e}"
+    return msg if len(msg) <= 160 else msg[:157] + "..."
+
+
+_DEAD_HOSTS: dict[str, str] = {}
+
+
+def _get(url: str, **kwargs) -> requests.Response:
+    host = requests.utils.urlparse(url).hostname or url
+    if host in _DEAD_HOSTS:
+        # 같은 실행에서 이미 두 번 연속 접속 실패한 호스트는 바로 건너뛴다
+        raise ConnectionError(f"{host} 접속 불가")
+    try:
+        r = requests.get(url, headers=UA, timeout=(10, HTTP_TIMEOUT), **kwargs)
+    except (requests.ConnectionError, requests.Timeout) as e:
+        _HOST_FAILS[host] = _HOST_FAILS.get(host, 0) + 1
+        if _HOST_FAILS[host] >= 2:
+            _DEAD_HOSTS[host] = type(e).__name__
+        raise
+    _HOST_FAILS.pop(host, None)
+    r.raise_for_status()
+    return r
+
+
+_HOST_FAILS: dict[str, int] = {}
+
+
+def fetch_fred(series_id: str) -> pd.Series:
+    r = _get("https://fred.stlouisfed.org/graph/fredgraph.csv", params={"id": series_id})
+    df = pd.read_csv(io.StringIO(r.text))
+    date_col = df.columns[0]  # observation_date (구 형식: DATE)
+    s = pd.to_numeric(df[series_id], errors="coerce")  # 결측치 "." 처리
+    s.index = pd.to_datetime(df[date_col])
+    s = s.dropna()
+    if s.empty:
+        raise ValueError(f"FRED {series_id} 빈 데이터")
+    return s
+
+
+def fetch_yahoo(ticker: str, start: dt.date) -> pd.Series:
+    import yfinance as yf
+
+    df = yf.download(ticker, start=start.isoformat(), progress=False, auto_adjust=False, threads=False)
+    if df is None or df.empty:
+        raise ValueError(f"Yahoo {ticker} 빈 데이터")
+    close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    s = close.dropna()
+    s.index = pd.to_datetime(s.index).tz_localize(None).normalize()
+    return s.astype(float)
+
+
+def fetch_stooq(symbol: str, start: dt.date) -> pd.Series:
+    r = _get("https://stooq.com/q/d/l/", params={"s": symbol, "i": "d", "d1": start.strftime("%Y%m%d")})
+    df = pd.read_csv(io.StringIO(r.text))
+    if "Close" not in df.columns or df.empty:
+        raise ValueError(f"stooq {symbol} 응답 형식 오류")
+    s = pd.to_numeric(df["Close"], errors="coerce")
+    s.index = pd.to_datetime(df["Date"])
+    return s.dropna()
+
+
+def fetch_mof_jgb10() -> pd.Series:
+    """일본 재무성 JGB 금리 CSV(1974년~) 에서 10년물."""
+    r = _get("https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv")
+    lines = r.content.decode("utf-8", errors="replace").splitlines()
+    head = next(i for i, ln in enumerate(lines) if "10Y" in ln)
+    df = pd.read_csv(io.StringIO("\n".join(lines[head:])))
+    s = pd.to_numeric(df["10Y"], errors="coerce")
+    s.index = pd.to_datetime(df[df.columns[0]], errors="coerce")
+    s = s[s.index.notna()].dropna()
+    if s.empty:
+        raise ValueError("MOF 10Y 빈 데이터")
+    return s
+
+
+@dataclass
+class Fetched:
+    series: pd.Series
+    source: str  # 캡션용 출처 이름
+
+
+def fetch_chain(name: str, candidates: list[tuple[str, str, callable]]) -> Fetched:
+    """(저장키, 출처명, 호출함수) 목록을 차례로 시도. 성공한 결과를 data/에 누적 저장."""
+    errors = []
+    for key, source, call in candidates:
+        try:
+            s = with_retry(call)
+            s = s[~s.index.duplicated(keep="last")].sort_index()
+            stored = store_series(key, s)
+            return Fetched(stored, source)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{source} {_short(e)}")
+    raise SourceError(f"{name}: " + "; ".join(errors))
+
+
+# ---------------------------------------------------------------------------
+# data/ CSV 누적 저장
+# ---------------------------------------------------------------------------
+
+
+def _csv_path(key: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    return DATA_DIR / f"{safe}.csv"
+
+
+def load_series(key: str) -> pd.Series:
+    path = _csv_path(key)
+    if not path.exists():
+        return pd.Series(dtype=float)
+    df = pd.read_csv(path, parse_dates=["date"])
+    return pd.Series(df["value"].values, index=df["date"], dtype=float)
+
+
+def append_rows(key: str, rows: pd.Series) -> int:
+    """기존 CSV에 없는 날짜만 뒤에 추가한다. 추가한 행 수를 돌려준다.
+
+    매일 한 줄씩 쌓는 지표(예: 좌수, DRAM 현물가)도
+    append_rows("dram_spot", pd.Series([값], index=[pd.Timestamp(오늘)])) 로 쓰면 된다.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = _csv_path(key)
+    existing = load_series(key)
+    rows = rows.dropna()
+    new = rows[~rows.index.isin(existing.index)]
+    if not existing.empty:
+        new = new[new.index > existing.index.max()]
+    if new.empty:
+        return 0
+    out = pd.DataFrame({"date": new.index.strftime("%Y-%m-%d"), "value": new.values})
+    write_header = not path.exists()
+    out.to_csv(path, mode="a", header=write_header, index=False, float_format="%.6g")
+    return len(out)
+
+
+def store_series(key: str, s: pd.Series) -> pd.Series:
+    append_rows(key, s)
+    stored = load_series(key)
+    # 이번에 받은 값과 저장값을 합쳐 차트에 사용(과거분 수정치는 새로 받은 값을 우선)
+    merged = pd.concat([stored, s])
+    return merged[~merged.index.duplicated(keep="last")].sort_index()
+
+
+# ---------------------------------------------------------------------------
+# 차트 스타일
+# ---------------------------------------------------------------------------
+
+
+def new_figure():
+    fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
+    fig.subplots_adjust(left=0.07, right=0.93, top=0.9, bottom=0.08)
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    ax.grid(False)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color("#888888")
+        ax.spines[side].set_linewidth(0.8)
+    ax.tick_params(colors="#333333", labelsize=11, length=4, width=0.8)
+    return fig, ax
+
+
+def unit_label(ax, text: str, right: bool = False) -> None:
+    x, ha = (1.0, "right") if right else (0.0, "left")
+    ax.text(x, 1.02, text, transform=ax.transAxes, ha=ha, va="bottom", fontsize=10, color="#555555")
+
+
+def date_axis(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
+    months = (end.year - start.year) * 12 + end.month - start.month
+    interval = 3 if months <= 30 else 6
+    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=range(1, 13, interval), bymonthday=1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m"))
+    ax.set_xlim(start, end + pd.Timedelta(days=max(3, months)))
+
+
+def legend(ax, handles=None) -> None:
+    kw = dict(loc="upper left", frameon=False, fontsize=12, handlelength=2.2)
+    if handles:
+        ax.legend(handles=handles, labels=[h.get_label() for h in handles], **kw)
+    else:
+        ax.legend(**kw)
+
+
+def save(fig, name: str) -> Path:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUT_DIR / f"{name}.png"
+    fig.savefig(path, facecolor="white", dpi=100)
+    plt.close(fig)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# 캡션 도우미
+# ---------------------------------------------------------------------------
+
+
+def md(ts: pd.Timestamp) -> str:
+    return f"{ts.month}/{ts.day}"
+
+
+def period_word(s: pd.Series) -> str:
+    gap = s.index.to_series().diff().dt.days.tail(10).median()
+    if gap >= 25:
+        return "전월"
+    if gap >= 5:
+        return "전주"
+    return "전일"
+
+
+def latest(s: pd.Series, fmt: str, unit: str = "", prefix: str = "", chg_unit: str | None = None) -> str:
+    """'값 (M/D 기준, 전일 대비 +x)' 형태."""
+    s = s.dropna()
+    v, d = s.iloc[-1], s.index[-1]
+    chg = v - s.iloc[-2] if len(s) > 1 else float("nan")
+    cu = unit if chg_unit is None else chg_unit
+    word = period_word(s)
+    when = f"{d.month}월" if word == "전월" else md(d)
+    return f"{prefix}{v:{fmt}}{unit} ({when} 기준, {word} 대비 {chg:+{fmt}}{cu})"
+
+
+def plot_x(s: pd.Series) -> pd.DatetimeIndex:
+    """월평균 시계열은 해당 월 가운데(15일)에 찍는다."""
+    return s.index + pd.Timedelta(days=14) if period_word(s) == "전월" else s.index
+
+
+def since(s: pd.Series, start: dt.date) -> pd.Series:
+    return s[s.index >= pd.Timestamp(start)]
+
+
+# ---------------------------------------------------------------------------
+# 차트 정의
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ChartResult:
+    path: Path
+    caption: str
+
+
+def chart_spread() -> ChartResult:
+    start = dt.date(2021, 1, 1)
+
+    def yahoo_spread() -> pd.Series:
+        ten = fetch_yahoo("^TNX", start)
+        two = fetch_yahoo("2YY=F", start)
+        return (ten - two).dropna()
+
+    f = fetch_chain(
+        "10Y-2Y 스프레드",
+        [
+            ("fred_T10Y2Y", "FRED T10Y2Y", lambda: fetch_fred("T10Y2Y")),
+            ("yahoo_TNX_minus_2YY", "Yahoo ^TNX−2YY=F(근사)", yahoo_spread),
+        ],
+    )
+    s = since(f.series, start)
+    fig, ax = new_figure()
+    ax.plot(s.index, s.values, color=COLORS[0], lw=LINE_WIDTH, label="미 10Y-2Y 스프레드")
+    ax.axhline(0, color="#999999", lw=0.8)
+    unit_label(ax, "(%p)")
+    date_axis(ax, s.index[0], s.index[-1])
+    legend(ax)
+    cap = f"미 10Y-2Y 스프레드 {latest(s, '.2f', '%p')} · 출처 {f.source}"
+    return ChartResult(save(fig, "1_spread"), cap)
+
+
+def chart_10y() -> ChartResult:
+    start = dt.date(2020, 1, 1)
+    countries = [
+        ("미국", [("fred_DGS10", "FRED DGS10", lambda: fetch_fred("DGS10")),
+                  ("yahoo_TNX", "Yahoo ^TNX", lambda: fetch_yahoo("^TNX", start))]),
+        ("한국", [("fred_IRLTLT01KRM156N", "FRED/OECD 월평균", lambda: fetch_fred("IRLTLT01KRM156N"))]),
+        ("중국", []),  # 안정적인 무료 출처 없음
+        ("일본", [("mof_JGB10Y", "일본 재무성", fetch_mof_jgb10),
+                  ("fred_IRLTLT01JPM156N", "FRED/OECD 월평균", lambda: fetch_fred("IRLTLT01JPM156N"))]),
+    ]
+    fig, ax = new_figure()
+    parts, sources, missing = [], [], []
+    last = pd.Timestamp(start)
+    for i, (country, chain) in enumerate(countries):
+        if not chain:
+            missing.append(f"{country} 출처 없음")
+            continue
+        try:
+            f = fetch_chain(f"{country} 10년", chain)
+        except SourceError as e:
+            print(f"[경고] {e}", file=sys.stderr)
+            missing.append(f"{country} 출처 없음")
+            continue
+        s = since(f.series, start)
+        ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=country)
+        parts.append(f"{country} {latest(s, '.2f', '%', chg_unit='%p')}")
+        sources.append(f"{country} {f.source}")
+        last = max(last, s.index[-1])
+    if not parts:
+        plt.close(fig)
+        raise SourceError("모든 국가 데이터 수집 실패")
+    unit_label(ax, "(%)")
+    date_axis(ax, pd.Timestamp(start), last)
+    legend(ax)
+    cap = "10년 국채금리 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(sources)
+    return ChartResult(save(fig, "2_10y"), cap)
+
+
+def chart_oil() -> ChartResult:
+    start = YEAR_START
+    oils = [
+        ("WTI", [("fred_DCOILWTICO", "FRED DCOILWTICO", lambda: fetch_fred("DCOILWTICO")),
+                 ("yahoo_CL=F", "Yahoo CL=F(선물)", lambda: fetch_yahoo("CL=F", start))]),
+        ("브렌트", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU", lambda: fetch_fred("DCOILBRENTEU")),
+                    ("yahoo_BZ=F", "Yahoo BZ=F(선물)", lambda: fetch_yahoo("BZ=F", start))]),
+        ("두바이", [("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
+    ]
+    fig, ax = new_figure()
+    parts, sources, missing = [], [], []
+    last = pd.Timestamp(start)
+    for i, (name, chain) in enumerate(oils):
+        try:
+            f = fetch_chain(name, chain)
+        except SourceError as e:
+            print(f"[경고] {e}", file=sys.stderr)
+            missing.append(f"{name} 출처 없음")
+            continue
+        s = since(f.series, start)
+        if s.empty:
+            missing.append(f"{name} 올해 데이터 없음")
+            continue
+        monthly = period_word(s) == "전월"
+        label = f"{name}(월평균)" if monthly else name
+        ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=label,
+                marker="o" if monthly else None, markersize=4)
+        parts.append(f"{label} {latest(s, '.2f', prefix='$')}")
+        sources.append(f"{name} {f.source}")
+        last = max(last, s.index[-1])
+    if not parts:
+        plt.close(fig)
+        raise SourceError("모든 유종 데이터 수집 실패")
+    unit_label(ax, "(달러/배럴)")
+    date_axis(ax, pd.Timestamp(start), last)
+    legend(ax)
+    cap = "유가 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(sources)
+    return ChartResult(save(fig, "3_oil"), cap)
+
+
+def chart_gasoline() -> ChartResult:
+    start = dt.date(2022, 1, 1)
+    f = fetch_chain("가솔린", [("fred_GASREGW", "FRED GASREGW", lambda: fetch_fred("GASREGW"))])
+    s = since(f.series, start)
+    fig, ax = new_figure()
+    ax.plot(s.index, s.values, color=COLORS[0], lw=LINE_WIDTH, label="미 가솔린 소매가격")
+    unit_label(ax, "(달러/갤런)")
+    date_axis(ax, s.index[0], s.index[-1])
+    legend(ax)
+    cap = f"미 가솔린 소매가격 {latest(s, '.2f', prefix='$')}/갤런 · 출처 {f.source}"
+    return ChartResult(save(fig, "4_gasoline"), cap)
+
+
+def _stock_chain(ticker: str, stooq_symbol: str, start: dt.date):
+    key = ticker.replace("^", "")
+    return [
+        (f"yahoo_{key}", "Yahoo", lambda: fetch_yahoo(ticker, start)),
+        (f"stooq_{key}", "stooq", lambda: fetch_stooq(stooq_symbol, start)),
+    ]
+
+
+def chart_dtcr_nvda() -> ChartResult:
+    start = dt.date(2023, 1, 1)
+    a = fetch_chain("DTCR", _stock_chain("DTCR", "dtcr.us", start))
+    b = fetch_chain("NVDA", _stock_chain("NVDA", "nvda.us", start))
+    sa, sb = since(a.series, start), since(b.series, start)
+    fig, ax = new_figure()
+    ax2 = ax.twinx()
+    ax2.spines["right"].set_visible(True)
+    ax2.spines["right"].set_color("#888888")
+    ax2.spines["right"].set_linewidth(0.8)
+    ax2.spines["top"].set_visible(False)
+    ax2.tick_params(colors="#333333", labelsize=11, length=4, width=0.8)
+    h1, = ax.plot(sa.index, sa.values, color=COLORS[0], lw=LINE_WIDTH, label="데이터센터 ETF DTCR(좌)")
+    h2, = ax2.plot(sb.index, sb.values, color=COLORS[1], lw=LINE_WIDTH, label="엔비디아 NVDA(우)")
+    unit_label(ax, "(달러)")
+    unit_label(ax2, "(달러)", right=True)
+    date_axis(ax, min(sa.index[0], sb.index[0]), max(sa.index[-1], sb.index[-1]))
+    legend(ax, [h1, h2])
+    cap = (f"DTCR {latest(sa, '.2f', prefix='$')} / NVDA {latest(sb, '.2f', prefix='$')}"
+           f" · 출처 DTCR {a.source}, NVDA {b.source}")
+    return ChartResult(save(fig, "5_dtcr_nvda"), cap)
+
+
+def chart_ibb_sox() -> ChartResult:
+    fetch_start = YEAR_START - dt.timedelta(days=14)
+    a = fetch_chain("IBB", _stock_chain("IBB", "ibb.us", fetch_start))
+    b = fetch_chain("SOX", _stock_chain("^SOX", "^sox", fetch_start))
+
+    def rebase(s: pd.Series) -> pd.Series:
+        base_part = s[s.index < pd.Timestamp(YEAR_START)]
+        base = base_part.iloc[-1] if not base_part.empty else since(s, YEAR_START).iloc[0]
+        return since(s, YEAR_START) / base * 100
+
+    ra, rb = rebase(a.series), rebase(b.series)
+    fig, ax = new_figure()
+    ax.plot(ra.index, ra.values, color=COLORS[0], lw=LINE_WIDTH, label="나스닥 바이오테크 IBB")
+    ax.plot(rb.index, rb.values, color=COLORS[1], lw=LINE_WIDTH, label="필라델피아 반도체 SOX")
+    ax.axhline(100, color="#999999", lw=0.8)
+    unit_label(ax, f"({TODAY.year % 100}/01/01=100)")
+    date_axis(ax, pd.Timestamp(YEAR_START), max(ra.index[-1], rb.index[-1]))
+    legend(ax)
+    cap = (f"연초=100 기준 IBB {latest(ra, '.1f')} / SOX {latest(rb, '.1f')}"
+           f" · 출처 IBB {a.source}, SOX {b.source}")
+    return ChartResult(save(fig, "6_ibb_sox"), cap)
+
+
+CHARTS = [
+    (1, "미 10Y-2Y 스프레드", chart_spread),
+    (2, "주요국 10년 국채금리", chart_10y),
+    (3, "유가", chart_oil),
+    (4, "미 가솔린 소매가격", chart_gasoline),
+    (5, "데이터센터 ETF·엔비디아", chart_dtcr_nvda),
+    (6, "바이오테크·반도체 연초 대비", chart_ibb_sox),
+]
+
+
+# ---------------------------------------------------------------------------
+# 텔레그램
+# ---------------------------------------------------------------------------
+
+
+class Telegram:
+    def __init__(self, token: str | None, chat_id: str | None, dry_run: bool):
+        self.dry_run = dry_run or not (token and chat_id)
+        self.base = f"https://api.telegram.org/bot{token}" if token else ""
+        self.chat_id = chat_id
+
+    def _post(self, method: str, **kwargs) -> None:
+        def call():
+            r = requests.post(f"{self.base}/{method}", timeout=60, **kwargs)
+            if not r.ok:
+                raise RuntimeError(f"{method} HTTP {r.status_code}: {r.text[:200]}")
+
+        with_retry(call)
+
+    def photo(self, path: Path, caption: str) -> None:
+        if self.dry_run:
+            print(f"[dry-run] 사진 {path.name} | {caption}")
+            return
+        with open(path, "rb") as fh:
+            data = fh.read()
+        self._post("sendPhoto", data={"chat_id": self.chat_id, "caption": caption[:1024]},
+                   files={"photo": (path.name, data, "image/png")})
+
+    def text(self, text: str) -> None:
+        if self.dry_run:
+            print(f"[dry-run] 텍스트 | {text}")
+            return
+        self._post("sendMessage", data={"chat_id": self.chat_id, "text": text[:4096],
+                                        "disable_web_page_preview": "true"})
+
+
+# ---------------------------------------------------------------------------
+# git 커밋
+# ---------------------------------------------------------------------------
+
+
+def git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
+
+
+def commit_data() -> None:
+    if git("rev-parse", "--is-inside-work-tree").returncode != 0:
+        return
+    git("add", "data")
+    if git("diff", "--cached", "--quiet", "--", "data").returncode == 0:
+        print("[git] data/ 변경 없음")
+        return
+    msg = f"data: 차트 데이터 갱신 {TODAY.isoformat()}"
+    ident = []
+    if not git("config", "user.email").stdout.strip():
+        ident = ["-c", "user.name=Owl Capital Briefing", "-c", "user.email=briefing@users.noreply.github.com"]
+    c = git(*ident, "commit", "-m", msg, "--", "data")
+    if c.returncode != 0:
+        print(f"[git] 커밋 실패: {c.stderr.strip()}", file=sys.stderr)
+        return
+    target = os.environ.get("CHARTS_DATA_BRANCH")
+    if not target:
+        head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip()
+        target = head.split("/", 1)[1] if "/" in head else ""
+    current = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    for branch in [b for b in dict.fromkeys([target, current]) if b and b != "HEAD"]:
+        p = git("push", "origin", f"HEAD:refs/heads/{branch}")
+        if p.returncode == 0:
+            print(f"[git] data/ 커밋을 {branch} 브랜치에 푸시")
+            return
+        print(f"[git] {branch} 푸시 실패: {p.stderr.strip()[-300:]}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# 실행
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Owl Capital 차트 브리핑")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-commit", action="store_true")
+    ap.add_argument("--only", default="")
+    args = ap.parse_args()
+
+    setup_korean_font()
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not args.dry_run and not (token and chat_id):
+        print("[경고] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없어 전송 없이 out/ 에만 저장합니다.", file=sys.stderr)
+    tg = Telegram(token, chat_id, args.dry_run)
+
+    only = {int(x) for x in args.only.split(",") if x.strip()}
+    failures = 0
+    for no, name, fn in CHARTS:
+        if only and no not in only:
+            continue
+        try:
+            res = fn()
+            tg.photo(res.path, res.caption)
+            print(f"[OK] {no}. {name}: {res.caption}")
+        except Exception as e:  # noqa: BLE001
+            failures += 1
+            reason = _short(e) if not isinstance(e, SourceError) else str(e)
+            print(f"[실패] {no}. {name}: {reason}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            try:
+                tg.text(f"{name} 차트 생성 실패: {reason}"[:1000])
+            except Exception as e2:  # noqa: BLE001
+                print(f"[실패] 실패 알림 전송도 실패: {_short(e2)}", file=sys.stderr)
+
+    if not args.no_commit:
+        commit_data()
+    return 1 if failures == len([c for c in CHARTS if not only or c[0] in only]) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
