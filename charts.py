@@ -317,11 +317,12 @@ def load_series(key: str) -> pd.Series:
     return pd.Series(df["value"].values, index=df["date"], dtype=float)
 
 
-def append_rows(key: str, rows: pd.Series) -> int:
+def append_rows(key: str, rows: pd.Series, float_format: str = "%.6g") -> int:
     """기존 CSV에 없는 날짜만 뒤에 추가한다. 추가한 행 수를 돌려준다.
 
     매일 한 줄씩 쌓는 지표(예: 좌수, DRAM 현물가)도
     append_rows("dram_spot", pd.Series([값], index=[pd.Timestamp(오늘)])) 로 쓰면 된다.
+    좌수·순자산처럼 자릿수가 큰 값은 float_format="%.15g" 로 반올림 없이 저장한다.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     path = _csv_path(key)
@@ -334,7 +335,7 @@ def append_rows(key: str, rows: pd.Series) -> int:
         return 0
     out = pd.DataFrame({"date": new.index.strftime("%Y-%m-%d"), "value": new.values})
     write_header = not path.exists()
-    out.to_csv(path, mode="a", header=write_header, index=False, float_format="%.6g")
+    out.to_csv(path, mode="a", header=write_header, index=False, float_format=float_format)
     return len(out)
 
 
@@ -716,6 +717,10 @@ def git(*args: str) -> subprocess.CompletedProcess:
 def commit_data() -> None:
     if git("rev-parse", "--is-inside-work-tree").returncode != 0:
         return
+    # 예약 실행은 브랜치마다 data/ 가 흩어지므로 커밋 전에 원격 모든 브랜치의 data/ 를 합친다
+    import data_merge
+
+    data_merge.merge_remote_data()
     git("add", "data")
     if git("diff", "--cached", "--quiet", "--", "data").returncode == 0:
         print("[git] data/ 변경 없음")
