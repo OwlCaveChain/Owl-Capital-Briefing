@@ -7,8 +7,8 @@
 | # | 차트 | 1순위 출처 | 대체 출처 |
 |---|------|-----------|-----------|
 | 1 | 미 10Y-2Y 스프레드 (2021-01~) | FRED T10Y2Y | Yahoo ^TNX − 2YY=F (근사, 2021-08~) |
-| 2 | 미·한·중·일 10년 국채금리 (2020-01~) | 미 FRED DGS10 / 한 FRED IRLTLT01KRM156N(OECD 월평균) / 일 재무성 jgbcme_all.csv | 미 Yahoo ^TNX / 일 FRED IRLTLT01JPM156N · 중국은 출처 없음 |
-| 3 | WTI·브렌트·두바이 (올해 1월~) | FRED DCOILWTICO, DCOILBRENTEU, POILDUBUSDM(IMF 월평균) | Yahoo CL=F, BZ=F (선물) |
+| 2 | 미·한·중·일 10년 국채금리 (2020-01~) | 미 FRED DGS10 / 한 FRED IRLTLT01KRM156N(OECD 월평균) / 일 재무성 jgbcme_all.csv + 당월 jgbcme.csv | 미 Yahoo ^TNX / 일 FRED IRLTLT01JPM156N · 중국은 출처 없음 |
+| 3 | WTI·브렌트·두바이 (올해 1월~) | FRED DCOILWTICO, DCOILBRENTEU (현물), 두바이 페트로넷 일일 현물 | Yahoo CL=F, BZ=F (선물), 두바이 FRED POILDUBUSDM(IMF 월평균) |
 | 4 | 미 가솔린 소매가격 (2022-01~) | FRED GASREGW | 없음 |
 | 5 | DTCR(좌)·NVDA(우) (2023-01~) | Yahoo(yfinance) | stooq |
 | 6 | IBB·SOX 연초=100 | Yahoo(yfinance) | stooq |

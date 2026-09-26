@@ -189,17 +189,65 @@ def fetch_stooq(symbol: str, start: dt.date) -> pd.Series:
     return s.dropna()
 
 
-def fetch_mof_jgb10() -> pd.Series:
-    """일본 재무성 JGB 금리 CSV(1974년~) 에서 10년물."""
-    r = _get("https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv")
-    lines = r.content.decode("utf-8", errors="replace").splitlines()
+MOF_BASE = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate"
+
+
+def _parse_mof_csv(raw: bytes) -> pd.Series:
+    lines = raw.decode("utf-8", errors="replace").splitlines()
     head = next(i for i, ln in enumerate(lines) if "10Y" in ln)
-    df = pd.read_csv(io.StringIO("\n".join(lines[head:])))
+    df = pd.read_csv(io.StringIO("\n".join(lines[head:])), on_bad_lines="skip")
     s = pd.to_numeric(df["10Y"], errors="coerce")
-    s.index = pd.to_datetime(df[df.columns[0]], errors="coerce")
-    s = s[s.index.notna()].dropna()
+    s.index = pd.to_datetime(df[df.columns[0]], format="%Y/%m/%d", errors="coerce")
+    return s[s.index.notna()].dropna()
+
+
+def fetch_mof_jgb10() -> pd.Series:
+    """일본 재무성 JGB 10년물. 과거 파일(전월 말까지)에 당월 파일을 이어 붙인다."""
+    hist = _parse_mof_csv(_get(f"{MOF_BASE}/historical/jgbcme_all.csv").content)
+    try:
+        cur = _parse_mof_csv(_get(f"{MOF_BASE}/jgbcme.csv").content)
+    except Exception as e:  # noqa: BLE001  당월 파일이 없어도 과거분으로 진행
+        print(f"[경고] MOF 당월 파일 실패: {_short(e)}", file=sys.stderr)
+        cur = pd.Series(dtype=float)
+    s = pd.concat([hist, cur])
+    s = s[~s.index.duplicated(keep="last")].sort_index()
     if s.empty:
         raise ValueError("MOF 10Y 빈 데이터")
+    return s
+
+
+def fetch_petronet_dubai(start: dt.date) -> pd.Series:
+    """한국석유공사 페트로넷 일일국제원유가격(엑셀 다운로드)에서 두바이 현물가."""
+    session = requests.Session()
+    session.headers.update(UA)
+    session.get("https://www.petronet.co.kr/v4/main.jsp", timeout=(10, HTTP_TIMEOUT))  # 세션 쿠키
+    end = TODAY
+    params = {
+        "term": "d", "by": start.year, "bq": (start.month - 1) // 3 + 1, "bm": f"{start.month:02d}", "bw": "01",
+        "bd": f"{start.day:02d}", "ay": end.year, "aq": (end.month - 1) // 3 + 1, "am": f"{end.month:02d}",
+        "aw": "01", "ad": f"{end.day:02d}", "ProdCDList": "001,002,003,004",
+    }
+    r = session.get("https://www.petronet.co.kr/v4/excel/KDFQ0100_x2.jsp", params=params,
+                    timeout=(10, HTTP_TIMEOUT))
+    r.raise_for_status()
+    table = next(t for t in pd.read_html(io.StringIO(r.content.decode("utf-8", errors="replace")))
+                 if t.shape[1] >= 3 and (t.iloc[0] == "Dubai").any())
+    col = list(table.iloc[0]).index("Dubai")
+    rows = table.iloc[1:]
+    md_ = rows[0].astype(str).str.extract(r"(\d{1,2})월\s*(\d{1,2})일")
+    ok = md_.notna().all(axis=1)
+    # 조회 구간이 한 해 안이므로 연도는 시작 연도 기준(연말 넘김은 월이 줄어들면 다음 해)
+    months = md_[ok][0].astype(int).tolist()
+    years, y, prev = [], start.year, 0
+    for m in months:
+        if m < prev:
+            y += 1
+        years.append(y)
+        prev = m
+    idx = pd.to_datetime({"year": years, "month": months, "day": md_[ok][1].astype(int).tolist()})
+    s = pd.Series(pd.to_numeric(rows[ok][col], errors="coerce").values, index=pd.DatetimeIndex(idx)).dropna()
+    if s.empty:
+        raise ValueError("페트로넷 두바이 빈 데이터")
     return s
 
 
@@ -439,7 +487,8 @@ def chart_oil() -> ChartResult:
                  ("yahoo_CL=F", "Yahoo CL=F(선물)", lambda: fetch_yahoo("CL=F", start))]),
         ("브렌트", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU", lambda: fetch_fred("DCOILBRENTEU")),
                     ("yahoo_BZ=F", "Yahoo BZ=F(선물)", lambda: fetch_yahoo("BZ=F", start))]),
-        ("두바이", [("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
+        ("두바이", [("petronet_Dubai", "페트로넷", lambda: fetch_petronet_dubai(start)),
+                    ("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
     ]
     fig, ax = new_figure()
     parts, sources, missing = [], [], []
