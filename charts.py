@@ -4,8 +4,8 @@
 받은 시계열은 data/ 폴더에 CSV로 쌓고(새 날짜만 추가), 변경분을 git에 커밋·푸시한다.
 
 환경변수
-  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰 (루틴 프롬프트의 [전송 설정] 값)
-  TELEGRAM_CHAT_ID     텔레그램 채팅 ID
+  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰
+  TELEGRAM_CHAT_ID     텔레그램 채팅 ID (없거나 잘못되면 telegram_send.DEFAULT_CHAT_ID)
   CHARTS_DATA_BRANCH   data/ 커밋을 푸시할 브랜치 (기본: 원격 기본 브랜치)
 
 옵션
@@ -216,8 +216,16 @@ def fetch_mof_jgb10() -> pd.Series:
     return s
 
 
-def fetch_petronet_dubai(start: dt.date) -> pd.Series:
-    """한국석유공사 페트로넷 일일국제원유가격(엑셀 다운로드)에서 두바이 현물가."""
+_PETRONET: dict[dt.date, pd.DataFrame] = {}
+
+
+def fetch_petronet(start: dt.date) -> pd.DataFrame:
+    """한국석유공사 페트로넷 일일국제원유가격(엑셀 다운로드). 열: Dubai(현물), Brent(ICE 선물), WTI(NYMEX 선물), Oman.
+
+    한 번 받은 표는 같은 실행 안에서 다시 쓴다.
+    """
+    if start in _PETRONET:
+        return _PETRONET[start]
     session = requests.Session()
     session.headers.update(UA)
     session.get("https://www.petronet.co.kr/v4/main.jsp", timeout=(10, HTTP_TIMEOUT))  # 세션 쿠키
@@ -232,7 +240,7 @@ def fetch_petronet_dubai(start: dt.date) -> pd.Series:
     r.raise_for_status()
     table = next(t for t in pd.read_html(io.StringIO(r.content.decode("utf-8", errors="replace")))
                  if t.shape[1] >= 3 and (t.iloc[0] == "Dubai").any())
-    col = list(table.iloc[0]).index("Dubai")
+    header = list(table.iloc[0])
     rows = table.iloc[1:]
     md_ = rows[0].astype(str).str.extract(r"(\d{1,2})월\s*(\d{1,2})일")
     ok = md_.notna().all(axis=1)
@@ -244,10 +252,23 @@ def fetch_petronet_dubai(start: dt.date) -> pd.Series:
             y += 1
         years.append(y)
         prev = m
-    idx = pd.to_datetime({"year": years, "month": months, "day": md_[ok][1].astype(int).tolist()})
-    s = pd.Series(pd.to_numeric(rows[ok][col], errors="coerce").values, index=pd.DatetimeIndex(idx)).dropna()
+    idx = pd.DatetimeIndex(pd.to_datetime({"year": years, "month": months, "day": md_[ok][1].astype(int).tolist()}))
+    names = [n for n in ("Dubai", "Brent", "WTI") if n in header]
+    df = pd.DataFrame({n: pd.to_numeric(rows[ok][header.index(n)], errors="coerce").values for n in names},
+                      index=idx)  # 휴장일 "-"는 결측
+    if df.empty:
+        raise ValueError("페트로넷 빈 데이터")
+    _PETRONET[start] = df
+    return df
+
+
+def fetch_petronet_oil(name: str, start: dt.date) -> pd.Series:
+    df = fetch_petronet(start)
+    if name not in df.columns:
+        raise ValueError(f"페트로넷 {name} 열 없음")
+    s = df[name].dropna()
     if s.empty:
-        raise ValueError("페트로넷 두바이 빈 데이터")
+        raise ValueError(f"페트로넷 {name} 빈 데이터")
     return s
 
 
@@ -480,19 +501,39 @@ def chart_10y() -> ChartResult:
     return ChartResult(save(fig, "2_10y"), cap)
 
 
+def brent_spot_premium(futures: pd.Series) -> str:
+    """FRED 브렌트 현물(DCOILBRENTEU) − 차트의 브렌트 선물, 두 값이 모두 있는 마지막 날짜 기준."""
+    try:
+        spot = fetch_chain("브렌트 현물", [("fred_DCOILBRENTEU", "FRED", lambda: fetch_fred("DCOILBRENTEU"))]).series
+    except SourceError as e:
+        print(f"[경고] {e}", file=sys.stderr)
+        return "브렌트 현물 프리미엄 확인 실패(FRED 수집 실패)"
+    both = pd.concat([spot.rename("spot"), futures.rename("fut")], axis=1, sort=True).dropna()
+    if both.empty:
+        return "브렌트 현물 프리미엄 확인 실패(겹치는 날짜 없음)"
+    d = both.index[-1]
+    diff = both["spot"].iloc[-1] - both["fut"].iloc[-1]
+    sign = "+" if diff >= 0 else "-"
+    return f"브렌트 현물 프리미엄 {sign}${abs(diff):.2f} (FRED, {md(d)} 기준)"
+
+
 def chart_oil() -> ChartResult:
     start = YEAR_START
+    # 1순위 페트로넷(두바이 현물, 브렌트 ICE 선물, WTI NYMEX 선물), 실패 시에만 기존 출처
     oils = [
-        ("WTI", [("fred_DCOILWTICO", "FRED DCOILWTICO", lambda: fetch_fred("DCOILWTICO")),
+        ("WTI", [("petronet_WTI", "페트로넷(NYMEX 선물)", lambda: fetch_petronet_oil("WTI", start)),
+                 ("fred_DCOILWTICO", "FRED DCOILWTICO(현물)", lambda: fetch_fred("DCOILWTICO")),
                  ("yahoo_CL=F", "Yahoo CL=F(선물)", lambda: fetch_yahoo("CL=F", start))]),
-        ("브렌트", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU", lambda: fetch_fred("DCOILBRENTEU")),
+        ("브렌트", [("petronet_Brent", "페트로넷(ICE 선물)", lambda: fetch_petronet_oil("Brent", start)),
+                    ("fred_DCOILBRENTEU", "FRED DCOILBRENTEU(현물)", lambda: fetch_fred("DCOILBRENTEU")),
                     ("yahoo_BZ=F", "Yahoo BZ=F(선물)", lambda: fetch_yahoo("BZ=F", start))]),
-        ("두바이", [("petronet_Dubai", "페트로넷", lambda: fetch_petronet_dubai(start)),
+        ("두바이", [("petronet_Dubai", "페트로넷(현물)", lambda: fetch_petronet_oil("Dubai", start)),
                     ("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
     ]
     fig, ax = new_figure()
     parts, sources, missing = [], [], []
     last = pd.Timestamp(start)
+    brent_futures: pd.Series | None = None
     for i, (name, chain) in enumerate(oils):
         try:
             f = fetch_chain(name, chain)
@@ -504,6 +545,8 @@ def chart_oil() -> ChartResult:
         if s.empty:
             missing.append(f"{name} 올해 데이터 없음")
             continue
+        if name == "브렌트" and "선물" in f.source:
+            brent_futures = s
         monthly = period_word(s) == "전월"
         label = f"{name}(월평균)" if monthly else name
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=label,
@@ -518,6 +561,10 @@ def chart_oil() -> ChartResult:
     date_axis(ax, pd.Timestamp(start), last)
     legend(ax)
     cap = "유가 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(sources)
+    if brent_futures is not None:
+        cap += "\n" + brent_spot_premium(brent_futures)
+    else:
+        cap += "\n브렌트 현물 프리미엄 확인 실패(브렌트 선물 데이터 없음)"
     return ChartResult(save(fig, "3_oil"), cap)
 
 
@@ -603,35 +650,7 @@ CHARTS = [
 # ---------------------------------------------------------------------------
 
 
-class Telegram:
-    def __init__(self, token: str | None, chat_id: str | None, dry_run: bool):
-        self.dry_run = dry_run or not (token and chat_id)
-        self.base = f"https://api.telegram.org/bot{token}" if token else ""
-        self.chat_id = chat_id
-
-    def _post(self, method: str, **kwargs) -> None:
-        def call():
-            r = requests.post(f"{self.base}/{method}", timeout=60, **kwargs)
-            if not r.ok:
-                raise RuntimeError(f"{method} HTTP {r.status_code}: {r.text[:200]}")
-
-        with_retry(call)
-
-    def photo(self, path: Path, caption: str) -> None:
-        if self.dry_run:
-            print(f"[dry-run] 사진 {path.name} | {caption}")
-            return
-        with open(path, "rb") as fh:
-            data = fh.read()
-        self._post("sendPhoto", data={"chat_id": self.chat_id, "caption": caption[:1024]},
-                   files={"photo": (path.name, data, "image/png")})
-
-    def text(self, text: str) -> None:
-        if self.dry_run:
-            print(f"[dry-run] 텍스트 | {text}")
-            return
-        self._post("sendMessage", data={"chat_id": self.chat_id, "text": text[:4096],
-                                        "disable_web_page_preview": "true"})
+from telegram_send import Telegram  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -684,11 +703,9 @@ def main() -> int:
     args = ap.parse_args()
 
     setup_korean_font()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not args.dry_run and not (token and chat_id):
-        print("[경고] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없어 전송 없이 out/ 에만 저장합니다.", file=sys.stderr)
-    tg = Telegram(token, chat_id, args.dry_run)
+    tg = Telegram(dry_run=args.dry_run)
+    if tg.dry_run and not args.dry_run:
+        print("[경고] TELEGRAM_BOT_TOKEN 이 없어 전송 없이 out/ 에만 저장합니다.", file=sys.stderr)
 
     only = {int(x) for x in args.only.split(",") if x.strip()}
     failures = 0
