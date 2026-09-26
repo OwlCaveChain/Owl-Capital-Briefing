@@ -379,9 +379,9 @@ def date_axis(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
     ax.set_xlim(start, end + pd.Timedelta(days=max(3, months)))
 
 
-def legend(ax, handles=None, title: str | None = None) -> None:
+def legend(ax, handles=None, title: str | None = None, loc: str = "upper left") -> None:
     """범례. title은 범례 위에 같은 크기로 작게(그림에 따로 큰 제목을 두지 않는다)."""
-    kw = dict(loc="upper left", frameon=False, fontsize=12, handlelength=2.2)
+    kw = dict(loc=loc, frameon=False, fontsize=12, handlelength=2.2)
     if title:
         kw.update(title=title, title_fontsize=12, alignment="left")
     if handles:
@@ -482,7 +482,7 @@ def chart_spread() -> ChartResult:
     ax.axhline(0, color="#999999", lw=0.8)
     unit_label(ax, "(%p)")
     date_axis(ax, s.index[0], s.index[-1])
-    legend(ax)
+    legend(ax, loc="upper center")  # 왼쪽 위는 21년 고점 선과 겹친다
     title = "미 10Y-2Y 스프레드"
     cap = caption(title, [latest(s, '.2f', '%p')], [f.source])
     return ChartResult(save(fig, "1_spread"), cap)
