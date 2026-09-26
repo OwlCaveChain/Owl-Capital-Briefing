@@ -8,36 +8,34 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Noto+Sans+KR:wght@400;700&display=swap">
 <style>
   :root{
-    --ink:#1F2A44; --sub:#56617A; --bg:#EEF1F4; --paper:#FFFFFF; --line:#D5DBE3;
-    --fear:#B4442F; --greed:#2F7D55; --amber:#C98A1B;
+    --ink:#1F2A44; --sub:#56617A; --bg:#EEF1F4; --paper:#FFFFFF; --line:#D5DBE3; --bad:#B4442F;
     box-sizing:border-box;
     padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
   }
   @media (prefers-color-scheme: dark){
-    :root{ --ink:#E6EAF2; --sub:#A3ADBF; --bg:#141A26; --paper:#1D2433; --line:#2E3747; }
+    :root{ --ink:#E6EAF2; --sub:#A3ADBF; --bg:#141A26; --paper:#1D2433; --line:#2E3747; --bad:#E07A66; }
   }
   *,*::before,*::after{box-sizing:inherit}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:18px/1.7 "Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
-  main{max-width:640px;margin:0 auto;padding:28px 18px 48px}
+  main{max-width:720px;margin:0 auto;padding:28px 16px 48px}
   header{margin-bottom:28px}
   h1{font:700 30px/1.3 "Gowun Batang",serif;margin:0}
   .date{color:var(--sub);margin-top:4px}
   section{background:var(--paper);border:1px solid var(--line);border-radius:14px;
     padding:22px 20px;margin-bottom:18px}
   h2{font:700 21px/1.4 "Gowun Batang",serif;margin:0 0 12px}
-  /* 공포·탐욕 지수: 페이지의 중심 요소 */
-  .fg-num{font:700 64px/1 "Gowun Batang",serif}
-  .fg-label{font-size:20px;font-weight:700;margin-left:8px}
-  .scale{position:relative;height:14px;border-radius:7px;margin:18px 0 6px;
-    background:linear-gradient(90deg,var(--fear),var(--amber) 50%,var(--greed))}
-  .needle{position:absolute;top:-6px;width:4px;height:26px;background:var(--ink);
-    border-radius:2px;transform:translateX(-2px)}
-  .ends{display:flex;justify-content:space-between;color:var(--sub);font-size:15px}
-  .note{color:var(--sub);font-size:16px;margin:12px 0 0}
-  img{max-width:100%;height:auto;display:block;border-radius:8px}
+  h3{font-size:17px;margin:20px 0 8px}
+  h2 .no{color:var(--sub);font-weight:400;margin-right:6px}
+  figure{margin:0 0 18px}
+  figure:last-child{margin-bottom:0}
+  img{max-width:100%;height:auto;display:block;border-radius:8px;background:#fff}
+  figcaption,.text{white-space:pre-line;font-size:16px;margin-top:8px;font-variant-numeric:tabular-nums}
+  .fail{color:var(--bad)}
   ul{margin:0;padding-left:1.1em}
-  li{margin-bottom:12px}
+  li{margin-bottom:10px}
+  .blog{font-weight:700;margin:18px 0 6px}
+  .blog:first-of-type{margin-top:0}
   a{color:var(--ink);text-underline-offset:3px}
   .who{color:var(--sub);font-size:15px}
   footer{color:var(--sub);font-size:15px;text-align:center;margin-top:28px}
@@ -48,68 +46,157 @@
 <main>
   <header>
     <h1>🦉 Owl Capital 아침 브리핑</h1>
-    <div class="date">2026년 9월 26일 (토) 오전 6시 기준</div>
+    <div class="date">2026년 9월 26일 (토) · 15:01 KST 생성</div>
   </header>
 
-  <section>
-    <h2>시장 심리 (공포·탐욕 지수)</h2>
-    <div><span class="fg-num">37</span><span class="fg-label">공포</span></div>
-    <div class="scale"><div class="needle" style="left:37%"></div></div>
-    <div class="ends"><span>극단적 공포 0</span><span>100 극단적 탐욕</span></div>
-    <p class="note">전일 36에서 37로 소폭 올랐지만 여전히 공포 구간. 1주 전 30 / 1개월 전 59 / 1년 전 50.</p>
+  <section id="m1">
+    <h2><span class="no">1</span>Fear &amp; Greed</h2>
+    <figure>
+      <img src="charts/2026-09-26-fg-1.png" alt="Fear &amp; Greed 지수" loading="lazy">
+      <figcaption>36 → 37</figcaption>
+    </figure>
+    <figure>
+      <img src="charts/2026-09-26-fg-2.png" alt="Fear &amp; Greed 지수" loading="lazy">
+      <figcaption>1주 전 30 / 1개월 전 59 / 1년 전 50</figcaption>
+    </figure>
   </section>
 
-  <section>
-    <h2>미국 휘발유 소매가격</h2>
-    <img src="charts/2026-09-26-gas.png" alt="미국 휘발유 소매가격 추이 차트">
-    <p class="note">9월 21일 기준 갤런당 $4.48, 전주 대비 +3.7%. 8월 말 이후 4주 연속 상승.</p>
-  </section>
-
-  <section>
-    <h2>구독 블로그 새 글</h2>
+  <section id="m2">
+    <h2><span class="no">2</span>블로그 새 글 (최근 24시간)</h2>
+    <div class="text">블로그 새 글 18건</div>
+    <div class="blog">알바트로스의 파생 이야기 (1건)</div>
     <ul>
       <li><a href="https://blog.naver.com/pillion21/224422880840">절대 가서는 안 되는 길.</a><br>
-        <span class="who">알바트로스의 파생 이야기</span> — 달러 선물을 떨어질 때마다 물타기로 사 모으던 젊은 투자자의 사례로, 파산까지 갈 수 있는 포지션의 위험을 짚는다.</li>
+        <span class="who">달러 선물을 떨어질 때마다 물타기로 사 모으던 젊은 투자자의 사례로, 파산까지 갈 수 있는 포지션의 위험을 짚는다.</span></li>
+    </ul>
+    <div class="blog">메르의 블로그 (2건)</div>
+    <ul>
       <li><a href="https://blog.naver.com/ranto28/224422887860">주절주절...첫 차 이야기등</a><br>
-        <span class="who">메르의 블로그</span> — 첫 차 그랜저와 강릉 여행 등 차에 얽힌 추억을 가볍게 풀어놓은 잡담 글.</li>
+        <span class="who">첫 차 그랜저와 강릉 여행 등 차에 얽힌 추억을 가볍게 풀어놓은 잡담 글.</span></li>
       <li><a href="https://blog.naver.com/ranto28/224422263567">미국국채 10년물이 5.2%를 찍는 이유?</a><br>
-        <span class="who">메르의 블로그</span> — 9월 23일 미 5년물 입찰 부진(낙찰 5.033%, 테일 3.1bp)을 계기로 국채금리 급등 배경을 정리.</li>
+        <span class="who">9월 23일 미 5년물 입찰 부진(낙찰 5.033%, 테일 3.1bp)을 계기로 국채금리 급등 배경을 정리.</span></li>
+    </ul>
+    <div class="blog">피우스의 책도둑 &amp; 매거진 (13건)</div>
+    <ul>
       <li><a href="https://blog.naver.com/jeunkim/224422910504">[오늘의 차트] AI &#x27;뮤즈&#x27; 날개 달고 30% 급등한 메타... 위기마다 반등 성공한 저커버그의 저력</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 9월 초 이후 30% 넘게 오른 메타 주가 반등을 다룬 야후파이낸스 &#x27;오늘의 차트&#x27; 번역.</li>
+        <span class="who">9월 초 이후 30% 넘게 오른 메타 주가 반등을 다룬 야후파이낸스 &#x27;오늘의 차트&#x27; 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422608735">[스펜서 자캅] AI와 소셜 미디어로 정교해진 주가 조작, 이제 투자자 스스로 방어해야 할 때</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 소셜미디어와 AI로 정교해진 초소형주 &#x27;펌프 앤 덤프&#x27;를 다룬 WSJ 스펜서 자캅 뉴스레터 번역.</li>
+        <span class="who">소셜미디어와 AI로 정교해진 초소형주 &#x27;펌프 앤 덤프&#x27;를 다룬 WSJ 스펜서 자캅 뉴스레터 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422602390">미·중 정상만찬에 집결한 미국 빅테크 CEO들... 반도체·AI 안전 등 주요 현안 논의</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 트럼프·시진핑 백악관 만찬에 모인 빅테크 CEO들과 반도체·AI 안전 논의를 다룬 비즈니스인사이더 번역.</li>
+        <span class="who">트럼프·시진핑 백악관 만찬에 모인 빅테크 CEO들과 반도체·AI 안전 논의를 다룬 비즈니스인사이더 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422579603">&quot;내 몫의 나랏빚은 얼마?&quot;…1인당 정부 부채로 본 글로벌 경제</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 1인당 정부 부채가 많은 나라 순위를 정리한 비주얼캐피털리스트 번역.</li>
+        <span class="who">1인당 정부 부채가 많은 나라 순위를 정리한 비주얼캐피털리스트 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422614803">워런 버핏의 작별 서한: &quot;시간은 언제나 승리한다&quot;와 복리의 마법</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 이사회 의장직에서 물러나는 버핏의 마지막 메시지와 복리의 힘을 다룬 모틀리풀 번역.</li>
+        <span class="who">이사회 의장직에서 물러나는 버핏의 마지막 메시지와 복리의 힘을 다룬 모틀리풀 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422487253">엔비디아의 파격적 배당 인상이 주목시킨 &#x27;배당 성장주&#x27;의 재발견</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 분기 배당을 주당 $0.01에서 $0.25로 올린 엔비디아와 배당 성장주 재조명을 다룬 모닝스타 번역.</li>
+        <span class="who">분기 배당을 주당 $0.01에서 $0.25로 올린 엔비디아와 배당 성장주 재조명을 다룬 모닝스타 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422631262">중국 제조업의 화려한 진화: 첨단 자동화와 글로벌 경제 파동</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 저가 생산에서 첨단 자동화로 옮겨간 중국 제조업을 다룬 워싱턴포스트 번역.</li>
+        <span class="who">저가 생산에서 첨단 자동화로 옮겨간 중국 제조업을 다룬 워싱턴포스트 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422560936">[낙관론자의 승리] &quot;꿈을 미루지 마라&quot;: 쇼생크 탈출 뒤에 숨겨진 또 하나의 감동 실화</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 쇼생크 탈출 감독 프랭크 다라본트의 삶을 다룬 빌 머피 주니어 칼럼 번역.</li>
+        <span class="who">쇼생크 탈출 감독 프랭크 다라본트의 삶을 다룬 빌 머피 주니어 칼럼 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422470151">월스트리트 황금률의 경고: &quot;주식, 무작정 오랫동안 들고 있지 마라&quot;</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 단기 옵션·레버리지 ETF 급증과 빅테크 쏠림 속 바이 앤 홀드 전략의 한계를 다룬 마켓워치 번역.</li>
+        <span class="who">단기 옵션·레버리지 ETF 급증과 빅테크 쏠림 속 바이 앤 홀드 전략의 한계를 다룬 마켓워치 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224421174866">로빈후드위 최고 중개 책임자 말하는 투자자들의 3가지 실수와 해결 방법</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 투자 계획을 지키지 않는 것 등 로빈후드 임원이 꼽은 투자자의 3가지 실수를 다룬 마켓츠인사이더 번역.</li>
+        <span class="who">투자 계획을 지키지 않는 것 등 로빈후드 임원이 꼽은 투자자의 3가지 실수를 다룬 마켓츠인사이더 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224420877862">빅테크 쏠림이 만든 착시... 미국 대형주 &#x27;마이너스 베타&#x27; 종목 급증의 의미</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — S&amp;P 500 종목 절반이 시장과 반대로 움직이는 &#x27;마이너스 베타&#x27; 현상을 다룬 FT 알파빌 번역.</li>
+        <span class="who">S&amp;P 500 종목 절반이 시장과 반대로 움직이는 &#x27;마이너스 베타&#x27; 현상을 다룬 FT 알파빌 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224420819210">[마크 헐버트] 이론과 다른 현실 시장: 저베타 전략을 유지하되 &#x27;이 한 주&#x27;만 고베타에 베팅하라</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 고베타 종목 베팅은 10월 중순까지 기다리라는 마크 헐버트의 마켓워치 칼럼 번역.</li>
+        <span class="who">고베타 종목 베팅은 10월 중순까지 기다리라는 마크 헐버트의 마켓워치 칼럼 번역.</span></li>
       <li><a href="https://blog.naver.com/jeunkim/224422590660">[스펜서 자캅] 워런 버핏도 다시는 버핏처럼 투자할 수 없는 이유... 성공이 만드는 규모의 한계</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 규모의 한계 탓에 버핏 본인도 초기 방식으로 다시 투자할 수 없다는 WSJ 스펜서 자캅 뉴스레터 번역.</li>
-      <li><a href="https://blog.naver.com/jeunkim/224422458799">[오늘의 차트] 미 30년 만기 국채 금리 2004년 이후 최고... 주식 시장에 미칠 영향은?</a><br>
-        <span class="who">피우스의 책도둑 &amp; 매거진</span> — 2004년 이후 최고치를 찍은 미 30년물 금리와 증시 영향을 다룬 야후파이낸스 &#x27;오늘의 차트&#x27; 번역.</li>
+        <span class="who">규모의 한계 탓에 버핏 본인도 초기 방식으로 다시 투자할 수 없다는 WSJ 스펜서 자캅 뉴스레터 번역.</span></li>
+    </ul>
+    <div class="blog">&quot;퀄리티&quot;를 찾아서 (1건)</div>
+    <ul>
       <li><a href="https://blog.naver.com/thingschange_/224422689063">비싸더라도 정말 수준 높은 제품을 만들어야 한다 - a16z 어니쉬 아차리야</a><br>
-        <span class="who">&quot;퀄리티&quot;를 찾아서</span> — AI 제품의 고객획득비용을 일종의 보조금으로 보는 a16z 어니쉬 아차리야의 인터뷰 번역.</li>
+        <span class="who">AI 제품의 고객획득비용을 일종의 보조금으로 보는 a16z 어니쉬 아차리야의 인터뷰 번역.</span></li>
+    </ul>
+    <div class="blog">Rafiki Research (1건)</div>
+    <ul>
       <li><a href="https://rafikiresearch.blogspot.com/2026/09/macro-daily20260928.html">macro daily_2026.09.28</a><br>
-        <span class="who">Rafiki Research</span> — 연휴 중 MSCI Korea ETF 1.0% 하락, 미 10년물 5% 상회, 미중 정상회담은 무역휴전 2개월 연장에 그침.</li>
+        <span class="who">연휴 중 MSCI Korea ETF 1.0% 하락, 미 10년물 5% 상회, 미중 정상회담은 무역휴전 2개월 연장에 그침.</span></li>
     </ul>
   </section>
 
-  <footer>매일 오전 6시 자동 갱신 · <a href="archive.html">지난 브리핑 보기</a></footer>
+  <section id="m3">
+    <h2><span class="no">3</span>핀비즈 S&amp;P 500 히트맵</h2>
+    <figure>
+      <img src="charts/2026-09-26-heatmap-1.png" alt="핀비즈 S&amp;P 500 히트맵 1일" loading="lazy">
+    </figure>
+    <figure>
+      <img src="charts/2026-09-26-heatmap-2.png" alt="핀비즈 S&amp;P 500 히트맵 4주" loading="lazy">
+    </figure>
+    <figure>
+      <img src="charts/2026-09-26-heatmap-3.png" alt="핀비즈 S&amp;P 500 히트맵 연초 대비" loading="lazy">
+    </figure>
+  </section>
+
+  <section id="m4">
+    <h2><span class="no">4</span>미 천연가스</h2>
+    <figure>
+      <img src="charts/2026-09-26-natgas.png" alt="헨리허브 천연가스 선물 차트" loading="lazy">
+      <figcaption>$3.196/MMBtu (-3.1%)</figcaption>
+    </figure>
+  </section>
+
+  <section id="m5">
+    <h2><span class="no">5</span>차트</h2>
+    <h3>미 10Y-2Y 스프레드</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-1.png" alt="미 10Y-2Y 스프레드" loading="lazy">
+      <figcaption>0.36%p (+0.05%p)</figcaption>
+    </figure>
+    <h3>주요국 10년 국채금리</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-2.png" alt="주요국 10년 국채금리" loading="lazy">
+      <figcaption>미국 5.18% (+0.07%p, 9/24)
+한국 4.39% (-0.07%p, 9/23)
+일본 3.07% (+0.09%p, 9/24)</figcaption>
+    </figure>
+    <h3>유가</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-3.png" alt="유가" loading="lazy">
+      <figcaption>WTI $92.41 (-2.3%)
+브렌트 $104.32 (-2.1%)
+두바이 $113.29 (-3.3%)
+브렌트 현물 프리미엄 +$15.64 (9/22)</figcaption>
+    </figure>
+    <h3>미 가솔린 소매가격</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-4.png" alt="미 가솔린 소매가격" loading="lazy">
+      <figcaption>$4.48/갤런 (+3.7%, 9/21)</figcaption>
+    </figure>
+    <h3>데이터센터 ETF·엔비디아</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-5.png" alt="데이터센터 ETF·엔비디아" loading="lazy">
+      <figcaption>DTCR $27.84 (-0.4%)
+NVDA $225.07 (+0.2%)</figcaption>
+    </figure>
+    <h3>바이오테크·반도체 연초 대비</h3>
+    <figure>
+      <img src="charts/2026-09-26-chart-6.png" alt="바이오테크·반도체 연초 대비" loading="lazy">
+      <figcaption>IBB 124.3 (+0.2%)
+SOX 178.9 (+1.4%)</figcaption>
+    </figure>
+  </section>
+
+  <section id="m6">
+    <h2><span class="no">6</span>메모리</h2>
+    <div class="text">DRAM ETF $61.91 (+2.0%)
+· 좌수 4억 3,433만좌
+
+SK하이닉스 2배(7709) HK$42.52 (-3.0%, 9/24)
+· 좌수 8억 4,200만좌 (9/23)
+
+삼성전자 2배(7747) HK$82.80 (-4.1%, 9/24)
+· 좌수 1억 100만좌 (9/23)
+
+DRAM 현물가(세션 평균) 9/24
+DDR5 16Gb $57.667 (+0.29%)
+DDR4 16Gb $83.784 (-0.70%)
+DDR4 8Gb $46.107 (+0.47%)</div>
+  </section>
+
+  <footer><a href="archive.html">지난 브리핑 보기</a></footer>
 </main>
 </body>
 </html>

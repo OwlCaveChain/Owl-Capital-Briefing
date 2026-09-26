@@ -99,6 +99,20 @@ DDR4 8Gb $46.107 (+0.47%)
   - 텍스트로 남은 항목은 이어진 것끼리 한 통으로, 차트는 항목 순서(DRAM ETF → 7709 → 7747 → 현물가)대로 보낸다. 차트를 못 그리면 그 항목은 텍스트로
 - 단독 실행 `python memory.py --dry-run`. `--dry-run`이 아니면 끝나고 data/를 커밋·푸시한다.
 
+## 브리핑 사이트 (`site_build.py`, GitHub Pages `docs/`)
+
+```
+python site_build.py          # 텔레그램 전송 없이 메시지 1~6 이미지·캡션과 블로그 목록을 다시 만들어 docs/<오늘>.html 생성,
+                              # index.html 을 그 페이지로, archive.html 에 날짜 추가, 마지막에 비밀값 검사
+python site_build.py --check  # docs/ 비밀값 검사만
+```
+
+- 이미지는 `docs/charts/<날짜>-<이름>.png`로 복사한다(같은 날짜로 다시 만들면 안 쓰는 옛 이미지는 지운다).
+- 블로그 한 줄 요약은 자동으로 만들지 않는다. 같은 날짜 페이지에 이미 있던 요약만 같은 글 URL에 이어 붙인다.
+- 비밀값 검사: 이름에 TOKEN·KEY·SECRET·PASS·AUTH·CHAT_ID 가 들어간 환경변수 값이 docs/ 파일(이미지 포함)에 있는지,
+  텔레그램·GitHub·AWS·Anthropic 토큰 형식과 `api.telegram.org/bot` 주소가 HTML에 있는지 본다. 찾으면 종료 코드 1(값은 출력하지 않음).
+- git 커밋·푸시는 하지 않는다.
+
 ## data/ 보존: 모든 브랜치에서 합치기 (`data_merge.py`, `cleanup_data.py`)
 
 예약 실행은 세션 브랜치(claude/*)로만 푸시되는 경우가 있어 data/ 누적분이 브랜치마다 흩어진다.
