@@ -47,8 +47,9 @@ def setup_korean_font() -> str | None:
         names = {f.name for f in font_manager.fontManager.ttflist}
         return next((n for n in KOREAN_FONTS if n in names), None)
 
-    if NANUM_PATH.exists():
-        font_manager.fontManager.addfont(str(NANUM_PATH))
+    # 굵은 글씨(NanumGothicBold 등)도 쓰도록 같은 폴더의 나눔 글꼴을 모두 등록
+    for path in sorted(NANUM_PATH.parent.glob("NanumGothic*.ttf")) if NANUM_PATH.parent.exists() else []:
+        font_manager.fontManager.addfont(str(path))
     name = find()
     if name is None:
         # 폰트가 없으면 설치 후 캐시 재구성
