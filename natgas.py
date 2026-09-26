@@ -42,7 +42,7 @@ def draw(s):
 
     fig = Figure(figsize=(10, 5.5), facecolor="white")
     ax = fig.add_subplot()
-    ax.plot(s.index, s.values, color="black", lw=1.3, label="미 천연가스(헨리허브 선물)")
+    ax.plot(s.index, s.values, color="black", lw=3.0, label="미 천연가스(헨리허브 선물)")
     ax.legend(loc="upper center", frameon=False, fontsize=12)
     ax.grid(False)
     ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))

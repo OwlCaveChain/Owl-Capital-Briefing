@@ -199,7 +199,7 @@ def draw_timeline(s):
     ax.set_xlim(s.index[0], s.index[-1])
     for level in (25, 50, 75):
         ax.axhline(level, color="#BDBDBD", lw=1, linestyle=(0, (4, 4)), zorder=1)
-    ax.plot(s.index, s.values, color=LINE_BLUE, lw=2, zorder=3)
+    ax.plot(s.index, s.values, color=LINE_BLUE, lw=3.0, zorder=3)
 
     ax.yaxis.tick_right()
     ax.yaxis.set_major_locator(FixedLocator([0, 25, 50, 75, 100]))
