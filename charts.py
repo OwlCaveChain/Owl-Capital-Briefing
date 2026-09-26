@@ -220,6 +220,37 @@ def fetch_mof_jgb10() -> pd.Series:
     return s
 
 
+ECOS_BASE = "https://ecos.bok.or.kr/api/StatisticSearch"
+ECOS_KR10Y = ("817Y002", "010210000")  # 1.3.2.1. 시장금리(일별) / 국고채(10년), 연%
+
+
+def fetch_ecos(stat_code: str, item_code: str, key: str, start: dt.date) -> pd.Series:
+    """한국은행 ECOS 일별 통계. 저장분이 있으면 마지막 날짜 2주 전부터만 받는다(키 ECOS_API_KEY)."""
+    api_key = os.environ.get("ECOS_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("ECOS_API_KEY 없음")
+    stored = load_series(key)
+    if not stored.empty:
+        start = max(start, (stored.index.max() - pd.Timedelta(days=14)).date())
+    url = (f"{ECOS_BASE}/{api_key}/json/kr/1/100000/{stat_code}/D/"
+           f"{start:%Y%m%d}/{TODAY:%Y%m%d}/{item_code}")
+    try:
+        j = _get(url).json()
+    except Exception as e:  # noqa: BLE001  오류 메시지의 URL에서 키를 가린다
+        raise SourceError(_short(e).replace(api_key, "***")) from None
+    if "StatisticSearch" not in j:
+        res = j.get("RESULT", {})
+        if res.get("CODE") == "INFO-200" and not stored.empty:
+            return stored[stored.index >= pd.Timestamp(start)]  # 새 값 없음(휴장)
+        raise ValueError(f"ECOS {res.get('CODE', '?')} {res.get('MESSAGE', '')}".strip())
+    rows = j["StatisticSearch"]["row"]
+    s = pd.Series(pd.to_numeric([r["DATA_VALUE"] for r in rows], errors="coerce"),
+                  index=pd.to_datetime([r["TIME"] for r in rows], format="%Y%m%d")).dropna()
+    if s.empty:
+        raise ValueError(f"ECOS {stat_code}/{item_code} 빈 데이터")
+    return s
+
+
 PETRONET_COLS = {"Dubai": "Dubai", "Brent": "Brent", "WTI": "WTI"}
 
 
@@ -288,6 +319,8 @@ def fetch_chain(name: str, candidates: list[tuple[str, str, callable]]) -> Fetch
             s = with_retry(call)
             s = s[~s.index.duplicated(keep="last")].sort_index()
             stored = store_series(key, s)
+            if errors:
+                print(f"[경고] {name}: {'; '.join(errors)} → {source} 사용", file=sys.stderr)
             return Fetched(stored, source)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{source} {_short(e)}")
@@ -478,9 +511,12 @@ def chart_10y() -> ChartResult:
     countries = [
         ("미국", [("fred_DGS10", "FRED", lambda: fetch_fred("DGS10")),
                   ("yahoo_TNX", "Yahoo", lambda: fetch_yahoo("^TNX", start))]),
-        ("한국", [("fred_IRLTLT01KRM156N", "FRED", lambda: fetch_fred("IRLTLT01KRM156N"))]),
+        ("한국", [("ecos_817Y002_010210000", "ECOS 일별",
+                   lambda: fetch_ecos(*ECOS_KR10Y, "ecos_817Y002_010210000", start)),
+                  ("fred_IRLTLT01KRM156N", "FRED 월평균(ECOS 실패 대체)",
+                   lambda: fetch_fred("IRLTLT01KRM156N"))]),
         ("중국", []),  # 안정적인 무료 출처 없음
-        ("일본", [("mof_JGB10Y", "일본 재무성", fetch_mof_jgb10),
+        ("일본", [("mof_JGB10Y", "재무성", fetch_mof_jgb10),
                   ("fred_IRLTLT01JPM156N", "FRED", lambda: fetch_fred("IRLTLT01JPM156N"))]),
     ]
     fig, ax = new_figure()
@@ -497,7 +533,7 @@ def chart_10y() -> ChartResult:
         s = since(f.series, start)
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=country)
         lines[country] = f"{country} {latest(s, '.2f', '%', chg_unit='%p')}"
-        sources.append(f.source)
+        sources.append(f"{country} {f.source}")
         last = max(last, s.index[-1])
     if not sources:
         plt.close(fig)

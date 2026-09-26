@@ -25,7 +25,7 @@ python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡�
 토큰이 없으면 dry-run으로 동작한다. 성공할 때마다 `[telegram] ok message_id=N` 을 출력한다.
 전송은 항상 `parse_mode=HTML`(링크 미리보기 끔). `html=False`(기본)면 본문을 자동 이스케이프하고, dry-run은 텔레그램에 보일 글자 그대로 출력한다.
 
-캡션 규칙: 첫 줄 제목, 시리즈마다 한 줄, 출처는 캡션에 쓰지 않고 실행 로그(`[출처]`)에만 남긴다. 날짜는 직전 영업일보다 오래된 값에만 `(9/22)`처럼 붙인다.
+캡션 규칙: 첫 줄 제목, 시리즈마다 한 줄, 출처는 캡션에 쓰지 않고 실행 로그(`[출처]`, 금리 차트는 나라별)에만 남긴다. 대체 출처를 쓰면 1순위 실패 사유를 `[경고]`로 남긴다. 날짜는 직전 영업일보다 오래된 값에만 `(9/22)`처럼 붙인다.
 
 ```
 python telegram_send.py check
@@ -40,7 +40,7 @@ python telegram_send.py photo 파일.png "캡션"
 | # | 차트 | 1순위 출처 | 대체 출처 |
 |---|------|-----------|-----------|
 | 1 | 미 10Y-2Y 스프레드 (2021-01~) | FRED T10Y2Y | Yahoo ^TNX − 2YY=F (근사, 2021-08~) |
-| 2 | 미·한·중·일 10년 국채금리 (2020-01~) | 미 FRED DGS10 / 한 FRED IRLTLT01KRM156N(OECD 월평균) / 일 재무성 jgbcme_all.csv + 당월 jgbcme.csv | 미 Yahoo ^TNX / 일 FRED IRLTLT01JPM156N · 중국은 출처 없음 |
+| 2 | 미·한·중·일 10년 국채금리 (2020-01~) | 미 FRED DGS10 / 한 ECOS 817Y002/010210000(시장금리 일별 국고채 10년, `ECOS_API_KEY`) / 일 재무성 jgbcme_all.csv + 당월 jgbcme.csv | 미 Yahoo ^TNX / 한 FRED IRLTLT01KRM156N(OECD 월평균) / 일 FRED IRLTLT01JPM156N · 중국은 출처 없음 |
 | 3 | WTI·브렌트·두바이 (올해 1월~) | 페트로넷 일일국제원유가격: 두바이 현물, 브렌트 ICE 선물, WTI NYMEX 선물. 캡션에 브렌트 현물 프리미엄(FRED DCOILBRENTEU − 브렌트 선물, 공통 최근일) | WTI Yahoo CL=F, 브렌트 Yahoo BZ=F, 두바이 FRED POILDUBUSDM(IMF 월평균) |
 | 4 | 미 가솔린 소매가격 (2022-01~) | FRED GASREGW | 없음 |
 | 5 | DTCR(좌)·NVDA(우) (2023-01~) | Yahoo(yfinance) | stooq |
