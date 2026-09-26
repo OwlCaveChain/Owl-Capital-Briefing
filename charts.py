@@ -487,14 +487,12 @@ def chart_10y() -> ChartResult:
     lines, sources = {}, []
     last = pd.Timestamp(start)
     for i, (country, chain) in enumerate(countries):
-        if not chain:
-            lines[country] = f"{country} 출처 없음"
+        if not chain:  # 값이 없는 나라는 그래프·범례·캡션 모두에서 뺀다
             continue
         try:
             f = fetch_chain(f"{country} 10년", chain)
         except SourceError as e:
             print(f"[경고] {e}", file=sys.stderr)
-            lines[country] = f"{country} 출처 없음"
             continue
         s = since(f.series, start)
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=country)

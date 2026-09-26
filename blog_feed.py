@@ -33,6 +33,7 @@ FEEDS = [
 ]
 WINDOW = dt.timedelta(hours=24)
 MAX_LEN = 4000  # 텔레그램 한 메시지 4096자 한도에 여유를 둔다
+MAX_PER_BLOG = 5  # 블로그당 표시할 최대 글 수(최신순). 나머지는 "· 외 n건" 링크
 # RSS를 못 읽었을 때 "확인 실패"에 쓸 이름(채널 제목)
 KNOWN_NAMES = {
     "pillion21": "알바트로스의 파생 이야기", "tosoha1": "이것 또한 지나가리라", "ranto28": "메르의 블로그",
@@ -46,6 +47,18 @@ KNOWN_NAMES = {
 def feed_id(url: str) -> str:
     m = re.search(r"naver\.com/([\w.-]+)\.xml|//([\w-]+)\.blogspot", url)
     return (m.group(1) or m.group(2)) if m else url
+
+
+def clean_title(title: str) -> str:
+    """연속 공백·줄바꿈을 한 칸으로."""
+    return " ".join(title.split())
+
+
+def list_url(feed_url: str, channel_link: str) -> str:
+    """블로그 글 목록 페이지. 네이버는 PostList, 그 외는 채널 링크(블로그 첫 화면)."""
+    if "blog.rss.naver.com" in feed_url:
+        return f"https://blog.naver.com/PostList.naver?blogId={feed_id(feed_url)}"
+    return clean_link(channel_link) or feed_url
 
 
 def clean_link(link: str) -> str:
@@ -69,18 +82,23 @@ def read_feed(url: str, now: dt.datetime):
                 if when.tzinfo is None:
                     when = when.replace(tzinfo=dt.timezone.utc)
                 if dt.timedelta(0) <= now - when <= WINDOW or when > now:
-                    posts.append((when, (item.findtext("title") or "").strip(),
+                    posts.append((when, clean_title(item.findtext("title") or ""),
                                   clean_link(item.findtext("link") or "")))
-            return name, sorted(posts)
+            return name, list_url(url, channel.findtext("link") or ""), sorted(posts, reverse=True)
         except Exception as e:  # noqa: BLE001
             last = e
     raise RuntimeError(f"{type(last).__name__}: {last}"[:160])
 
 
-def group_block(name: str, posts) -> list[str]:
+def group_block(name: str, posts, more_url: str = "") -> list[str]:
+    """머리줄 + 최신 글 최대 MAX_PER_BLOG건, 초과분은 '· 외 n건'(글 목록 링크)."""
     lines = [f"🦉 <b>{esc(name)}</b> ({len(posts)}건)"]
-    for _, title, url in posts:
+    for _, title, url in posts[:MAX_PER_BLOG]:
         lines.append("· " + (link(url, title) if url else esc(title)))
+    rest = len(posts) - MAX_PER_BLOG
+    if rest > 0:
+        more = f"외 {rest}건"
+        lines.append("· " + (link(more_url, more) if more_url else esc(more)))
     return lines
 
 
@@ -118,13 +136,13 @@ def prepare() -> Prepared:
         futures = [(url, ex.submit(read_feed, url, now)) for url in FEEDS]
     for url, fut in futures:  # FEEDS 순서대로
         try:
-            name, posts = fut.result()
+            name, more_url, posts = fut.result()
         except Exception as e:  # noqa: BLE001
             failed.append(KNOWN_NAMES.get(feed_id(url), feed_id(url)))
             errors.append(f"{feed_id(url)} {e}")
             continue
         if posts:
-            blocks.append(group_block(name, posts))
+            blocks.append(group_block(name, posts, more_url))
             total += len(posts)
     header = f"블로그 새 글 {total}건" if total else "블로그 새 글 없음"
     footer = "확인 실패: " + esc(", ".join(failed)) if failed else ""
