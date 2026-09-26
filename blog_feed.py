@@ -15,6 +15,7 @@ from email.utils import parsedate_to_datetime
 import requests
 
 from briefing_common import UA, Message, Prepared, run_standalone
+from telegram_send import esc, link
 
 NAME = "블로그 새 글"
 FAIL_TEXT = "블로그 새 글 항목 확인 실패"
@@ -31,6 +32,15 @@ FEEDS = [
     "https://rafikiresearch.blogspot.com/feeds/posts/default?alt=rss",
 ]
 WINDOW = dt.timedelta(hours=24)
+MAX_LEN = 4000  # 텔레그램 한 메시지 4096자 한도에 여유를 둔다
+# RSS를 못 읽었을 때 "확인 실패"에 쓸 이름(채널 제목)
+KNOWN_NAMES = {
+    "pillion21": "알바트로스의 파생 이야기", "tosoha1": "이것 또한 지나가리라", "ranto28": "메르의 블로그",
+    "kk_kontemp": "KK Kontemporaries", "crush212121": "적절한 지식과 검증된 판단",
+    "circleofcompetence": "진리 그리고 투자", "survivaldopb": "도피비의 생존투자",
+    "jeunkim": "피우스의 책도둑 & 매거진", "thingschange_": "\"퀄리티\"를 찾아서",
+    "rafikiresearch": "Rafiki Research",
+}
 
 
 def feed_id(url: str) -> str:
@@ -49,7 +59,7 @@ def read_feed(url: str, now: dt.datetime):
             r = requests.get(url, headers=UA, timeout=30)
             r.raise_for_status()
             channel = ET.fromstring(r.content).find("channel")
-            name = (channel.findtext("title") or feed_id(url)).strip()
+            name = (channel.findtext("title") or KNOWN_NAMES.get(feed_id(url), feed_id(url))).strip()
             posts = []
             for item in channel.findall("item"):
                 pub = item.findtext("pubDate")
@@ -59,44 +69,67 @@ def read_feed(url: str, now: dt.datetime):
                 if when.tzinfo is None:
                     when = when.replace(tzinfo=dt.timezone.utc)
                 if dt.timedelta(0) <= now - when <= WINDOW or when > now:
-                    posts.append((when, name, (item.findtext("title") or "").strip(),
+                    posts.append((when, (item.findtext("title") or "").strip(),
                                   clean_link(item.findtext("link") or "")))
-            return posts
+            return name, sorted(posts)
         except Exception as e:  # noqa: BLE001
             last = e
     raise RuntimeError(f"{type(last).__name__}: {last}"[:160])
 
 
-def prepare() -> Prepared:
-    now = dt.datetime.now(dt.timezone.utc)
-    posts, failed, errors = [], [], []
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        futures = [(url, ex.submit(read_feed, url, now)) for url in FEEDS]
-    for url, fut in futures:
-        try:
-            posts.extend(fut.result())
-        except Exception as e:  # noqa: BLE001
-            failed.append(feed_id(url))
-            errors.append(f"{feed_id(url)} {e}")
-    posts.sort(key=lambda p: p[0])
-    if posts:
-        lines = [f"블로그 새 글 ({len(posts)}건)"]
-        for _, name, title, link in posts:
-            lines += [f"{name} — {title}", link]
-    else:
-        lines = ["블로그 새 글 없음"]
-    if failed:
-        lines.append("확인 실패: " + ", ".join(failed))
-    text = "\n".join(lines)
-    # 텔레그램 한 메시지는 4096자까지. 넘치면 둘로 나눈다
-    chunks, cur = [], ""
-    for line in text.split("\n"):
-        if len(cur) + len(line) + 1 > 4000:
+def group_block(name: str, posts) -> list[str]:
+    lines = [f"🦉 <b>{esc(name)}</b> ({len(posts)}건)"]
+    for _, title, url in posts:
+        lines.append("· " + (link(url, title) if url else esc(title)))
+    return lines
+
+
+def split_messages(header: str, blocks: list[list[str]], footer: str) -> list[str]:
+    """블로그 묶음 단위로 MAX_LEN을 넘지 않게 나눈다(묶음 하나가 넘치면 줄 단위로)."""
+    chunks: list[str] = []
+    cur = header
+    for block in blocks:
+        text = "\n".join(block)
+        if len(cur) + 2 + len(text) <= MAX_LEN:
+            cur = f"{cur}\n\n{text}" if cur else text
+            continue
+        if cur:
+            chunks.append(cur)
+        cur = ""
+        for line in block:  # 묶음 하나가 한도를 넘는 드문 경우
+            if cur and len(cur) + 1 + len(line) > MAX_LEN:
+                chunks.append(cur)
+                cur = ""
+            cur = f"{cur}\n{line}" if cur else line
+    if footer:
+        if cur and len(cur) + 2 + len(footer) > MAX_LEN:
             chunks.append(cur)
             cur = ""
-        cur = f"{cur}\n{line}" if cur else line
-    chunks.append(cur)
-    return Prepared([Message("text", c, label=f"새 글 목록{i + 1 if len(chunks) > 1 else ''}")
+        cur = f"{cur}\n\n{footer}" if cur else footer
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def prepare() -> Prepared:
+    now = dt.datetime.now(dt.timezone.utc)
+    blocks, failed, errors, total = [], [], [], 0
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futures = [(url, ex.submit(read_feed, url, now)) for url in FEEDS]
+    for url, fut in futures:  # FEEDS 순서대로
+        try:
+            name, posts = fut.result()
+        except Exception as e:  # noqa: BLE001
+            failed.append(KNOWN_NAMES.get(feed_id(url), feed_id(url)))
+            errors.append(f"{feed_id(url)} {e}")
+            continue
+        if posts:
+            blocks.append(group_block(name, posts))
+            total += len(posts)
+    header = f"블로그 새 글 {total}건" if total else "블로그 새 글 없음"
+    footer = "확인 실패: " + esc(", ".join(failed)) if failed else ""
+    chunks = split_messages(header, blocks, footer)
+    return Prepared([Message("text", c, label=f"새 글 목록{i + 1 if len(chunks) > 1 else ''}", html=True)
                      for i, c in enumerate(chunks)], errors)
 
 

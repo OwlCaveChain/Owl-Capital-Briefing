@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 
-from briefing_common import OUT_DIR, Message, Prepared, run_standalone, setup_korean_font
+from briefing_common import OUT_DIR, Message, Prepared, date_suffix, run_standalone, setup_korean_font
 
 NAME = "미 천연가스"
 FAIL_TEXT = "미 천연가스 차트 확인 실패"
@@ -60,8 +60,11 @@ def prepare() -> Prepared:
     s = fetch()
     last, prev, d = s.iloc[-1], s.iloc[-2], s.index[-1]
     chg = last - prev
-    cap = (f"미 천연가스(헨리허브 선물) {last:.3f}달러/MMBtu ({d.month}/{d.day}), "
-           f"전일 대비 {chg:+.3f} ({chg / prev * 100:+.1f}%)")
+    extra = f"{chg:+.3f}, {chg / prev * 100:+.1f}%"
+    when = date_suffix(d)
+    if when:
+        extra += f", {when}"
+    cap = f"미 천연가스\n${last:.3f}/MMBtu ({extra})"
     return Prepared([Message("photo", cap, draw(s), "차트")])
 
 

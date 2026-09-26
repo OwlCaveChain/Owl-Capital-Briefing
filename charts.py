@@ -55,6 +55,7 @@ import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 
 import telegram_send  # noqa: E402
+from briefing_common import date_suffix  # noqa: E402
 
 KST = dt.timezone(dt.timedelta(hours=9))
 TODAY = dt.datetime.now(KST).date()
@@ -408,14 +409,22 @@ def period_word(s: pd.Series) -> str:
 
 
 def latest(s: pd.Series, fmt: str, unit: str = "", prefix: str = "", chg_unit: str | None = None) -> str:
-    """'값 (M/D 기준, 전일 대비 +x)' 형태."""
+    """'$92.41 (-0.56)' 형태. 최근 1영업일보다 오래된 값만 '(+0.16, 9/21)'처럼 날짜를 붙인다."""
     s = s.dropna()
     v, d = s.iloc[-1], s.index[-1]
-    chg = v - s.iloc[-2] if len(s) > 1 else float("nan")
     cu = unit if chg_unit is None else chg_unit
-    word = period_word(s)
-    when = f"{d.month}월" if word == "전월" else md(d)
-    return f"{prefix}{v:{fmt}}{unit} ({when} 기준, {word} 대비 {chg:+{fmt}}{cu})"
+    extra = [f"{v - s.iloc[-2]:+{fmt}}{cu}"] if len(s) > 1 else []
+    when = date_suffix(d, monthly=period_word(s) == "전월")
+    if when:
+        extra.append(when)
+    return f"{prefix}{v:{fmt}}{unit}" + (f" ({', '.join(extra)})" if extra else "")
+
+
+def caption(title: str, lines: list[str], sources: list[str]) -> str:
+    """첫 줄 제목, 시리즈마다 한 줄. 출처는 캡션에 넣지 않고 실행 로그에만 남긴다(대체 출처 확인용)."""
+    if sources:
+        print(f"[출처] {title}: {', '.join(dict.fromkeys(sources))}")
+    return "\n".join([title, *lines])
 
 
 def plot_x(s: pd.Series) -> pd.DatetimeIndex:
@@ -449,8 +458,8 @@ def chart_spread() -> ChartResult:
     f = fetch_chain(
         "10Y-2Y 스프레드",
         [
-            ("fred_T10Y2Y", "FRED T10Y2Y", lambda: fetch_fred("T10Y2Y")),
-            ("yahoo_TNX_minus_2YY", "Yahoo ^TNX−2YY=F(근사)", yahoo_spread),
+            ("fred_T10Y2Y", "FRED", lambda: fetch_fred("T10Y2Y")),
+            ("yahoo_TNX_minus_2YY", "Yahoo(근사)", yahoo_spread),
         ],
     )
     s = since(f.series, start)
@@ -460,52 +469,53 @@ def chart_spread() -> ChartResult:
     unit_label(ax, "(%p)")
     date_axis(ax, s.index[0], s.index[-1])
     legend(ax)
-    cap = f"미 10Y-2Y 스프레드 {latest(s, '.2f', '%p')} · 출처 {f.source}"
+    cap = caption("미 10Y-2Y 스프레드", [latest(s, '.2f', '%p')], [f.source])
     return ChartResult(save(fig, "1_spread"), cap)
 
 
 def chart_10y() -> ChartResult:
     start = dt.date(2020, 1, 1)
     countries = [
-        ("미국", [("fred_DGS10", "FRED DGS10", lambda: fetch_fred("DGS10")),
-                  ("yahoo_TNX", "Yahoo ^TNX", lambda: fetch_yahoo("^TNX", start))]),
-        ("한국", [("fred_IRLTLT01KRM156N", "FRED/OECD 월평균", lambda: fetch_fred("IRLTLT01KRM156N"))]),
+        ("미국", [("fred_DGS10", "FRED", lambda: fetch_fred("DGS10")),
+                  ("yahoo_TNX", "Yahoo", lambda: fetch_yahoo("^TNX", start))]),
+        ("한국", [("fred_IRLTLT01KRM156N", "FRED", lambda: fetch_fred("IRLTLT01KRM156N"))]),
         ("중국", []),  # 안정적인 무료 출처 없음
         ("일본", [("mof_JGB10Y", "일본 재무성", fetch_mof_jgb10),
-                  ("fred_IRLTLT01JPM156N", "FRED/OECD 월평균", lambda: fetch_fred("IRLTLT01JPM156N"))]),
+                  ("fred_IRLTLT01JPM156N", "FRED", lambda: fetch_fred("IRLTLT01JPM156N"))]),
     ]
     fig, ax = new_figure()
-    parts, sources, missing = [], [], []
+    lines, sources = {}, []
     last = pd.Timestamp(start)
     for i, (country, chain) in enumerate(countries):
         if not chain:
-            missing.append(f"{country} 출처 없음")
+            lines[country] = f"{country} 출처 없음"
             continue
         try:
             f = fetch_chain(f"{country} 10년", chain)
         except SourceError as e:
             print(f"[경고] {e}", file=sys.stderr)
-            missing.append(f"{country} 출처 없음")
+            lines[country] = f"{country} 출처 없음"
             continue
         s = since(f.series, start)
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=country)
-        parts.append(f"{country} {latest(s, '.2f', '%', chg_unit='%p')}")
-        sources.append(f"{country} {f.source}")
+        lines[country] = f"{country} {latest(s, '.2f', '%', chg_unit='%p')}"
+        sources.append(f.source)
         last = max(last, s.index[-1])
-    if not parts:
+    if not sources:
         plt.close(fig)
         raise SourceError("모든 국가 데이터 수집 실패")
     unit_label(ax, "(%)")
     date_axis(ax, pd.Timestamp(start), last)
     legend(ax)
-    cap = "10년 국채금리 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(sources)
+    order = ["미국", "한국", "일본", "중국"]
+    cap = caption("주요국 10년 국채금리", [lines[c] for c in order if c in lines], sources)
     return ChartResult(save(fig, "2_10y"), cap)
 
 
 def brent_spot_premium(futures: pd.Series) -> str | None:
     """브렌트 현물(FRED Dated Brent) − 브렌트 ICE 선물(페트로넷), 두 값이 모두 있는 최근 날짜 기준."""
     try:
-        spot = fetch_chain("브렌트 현물", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU",
+        spot = fetch_chain("브렌트 현물", [("fred_DCOILBRENTEU", "FRED",
                                           lambda: fetch_fred("DCOILBRENTEU"))]).series
     except SourceError as e:
         print(f"[경고] {e}", file=sys.stderr)
@@ -515,7 +525,8 @@ def brent_spot_premium(futures: pd.Series) -> str | None:
         return None
     d = both.index[-1]
     prem = both["spot"].iloc[-1] - both["fut"].iloc[-1]
-    return f"브렌트 현물 프리미엄 {prem:+.2f} ({md(d)} 기준, 현물 ${both['spot'].iloc[-1]:.2f})"
+    when = date_suffix(d)
+    return f"브렌트 현물 프리미엄 {'+' if prem >= 0 else '-'}${abs(prem):.2f}" + (f" ({when})" if when else "")
 
 
 def chart_oil() -> ChartResult:
@@ -523,14 +534,14 @@ def chart_oil() -> ChartResult:
     start = YEAR_START
     oils = [
         ("WTI", "WTI(NYMEX 선물)",
-         [("petronet_WTI", "페트로넷", lambda: fetch_petronet("WTI", start)),
-          ("yahoo_CL=F", "Yahoo CL=F", lambda: fetch_yahoo("CL=F", start))]),
+         [("petronet_WTI", "Petronet", lambda: fetch_petronet("WTI", start)),
+          ("yahoo_CL=F", "Yahoo", lambda: fetch_yahoo("CL=F", start))]),
         ("브렌트", "브렌트(ICE 선물)",
-         [("petronet_Brent", "페트로넷", lambda: fetch_petronet("Brent", start)),
-          ("yahoo_BZ=F", "Yahoo BZ=F", lambda: fetch_yahoo("BZ=F", start))]),
+         [("petronet_Brent", "Petronet", lambda: fetch_petronet("Brent", start)),
+          ("yahoo_BZ=F", "Yahoo", lambda: fetch_yahoo("BZ=F", start))]),
         ("두바이", "두바이(현물)",
-         [("petronet_Dubai", "페트로넷", lambda: fetch_petronet("Dubai", start)),
-          ("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
+         [("petronet_Dubai", "Petronet", lambda: fetch_petronet("Dubai", start)),
+          ("fred_POILDUBUSDM", "FRED", lambda: fetch_fred("POILDUBUSDM"))]),
     ]
     fig, ax = new_figure()
     parts, sources, missing = [], [], []
@@ -552,8 +563,9 @@ def chart_oil() -> ChartResult:
             label = f"{name}(월평균)"
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=label,
                 marker="o" if monthly else None, markersize=4)
-        parts.append(f"{label} {latest(s, '.2f', prefix='$')}")
-        sources.append(f.source if f.source == "페트로넷" else f"{name} {f.source}")
+        parts.append(f"{name}(월평균) {latest(s, '.2f', prefix='$')}" if monthly
+                     else f"{name} {latest(s, '.2f', prefix='$')}")
+        sources.append(f.source)
         if name == "브렌트":
             brent = s
         last = max(last, s.index[-1])
@@ -565,23 +577,21 @@ def chart_oil() -> ChartResult:
     legend(ax)
     premium = brent_spot_premium(brent) if brent is not None else None
     if premium:
-        sources.append("브렌트 현물 FRED")
-    cap = "유가 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(dict.fromkeys(sources))
-    if premium:
-        cap += f"\n{premium}"
+        sources.append("FRED")
+    cap = caption("유가", parts + missing + ([premium] if premium else []), sources)
     return ChartResult(save(fig, "3_oil"), cap)
 
 
 def chart_gasoline() -> ChartResult:
     start = dt.date(2022, 1, 1)
-    f = fetch_chain("가솔린", [("fred_GASREGW", "FRED GASREGW", lambda: fetch_fred("GASREGW"))])
+    f = fetch_chain("가솔린", [("fred_GASREGW", "FRED", lambda: fetch_fred("GASREGW"))])
     s = since(f.series, start)
     fig, ax = new_figure()
     ax.plot(s.index, s.values, color=COLORS[0], lw=LINE_WIDTH, label="미 가솔린 소매가격")
     unit_label(ax, "(달러/갤런)")
     date_axis(ax, s.index[0], s.index[-1])
     legend(ax)
-    cap = f"미 가솔린 소매가격 {latest(s, '.2f', '/갤런', prefix='$', chg_unit='')} · 출처 {f.source}"
+    cap = caption("미 가솔린 소매가격", [latest(s, '.2f', '/갤런', prefix='$', chg_unit='')], [f.source])
     return ChartResult(save(fig, "4_gasoline"), cap)
 
 
@@ -611,8 +621,9 @@ def chart_dtcr_nvda() -> ChartResult:
     unit_label(ax2, "(달러)", right=True)
     date_axis(ax, min(sa.index[0], sb.index[0]), max(sa.index[-1], sb.index[-1]))
     legend(ax, [h1, h2])
-    cap = (f"DTCR {latest(sa, '.2f', prefix='$')} / NVDA {latest(sb, '.2f', prefix='$')}"
-           f" · 출처 DTCR {a.source}, NVDA {b.source}")
+    cap = caption("데이터센터 ETF · 엔비디아",
+                  [f"DTCR {latest(sa, '.2f', prefix='$')}", f"NVDA {latest(sb, '.2f', prefix='$')}"],
+                  [a.source, b.source])
     return ChartResult(save(fig, "5_dtcr_nvda"), cap)
 
 
@@ -634,8 +645,8 @@ def chart_ibb_sox() -> ChartResult:
     unit_label(ax, f"({TODAY.year % 100}/01/01=100)")
     date_axis(ax, pd.Timestamp(YEAR_START), max(ra.index[-1], rb.index[-1]))
     legend(ax)
-    cap = (f"연초=100 기준 IBB {latest(ra, '.1f')} / SOX {latest(rb, '.1f')}"
-           f" · 출처 IBB {a.source}, SOX {b.source}")
+    cap = caption("바이오테크 · 반도체 (연초=100)",
+                  [f"IBB {latest(ra, '.1f')}", f"SOX {latest(rb, '.1f')}"], [a.source, b.source])
     return ChartResult(save(fig, "6_ibb_sox"), cap)
 
 
@@ -730,7 +741,7 @@ def main() -> int:
             res = fn()
             mid = tg.photo(res.path, res.caption)
             sent = "" if mid is None else f" (message_id={mid})"
-            print(f"[OK] {no}. {name}{sent}: {res.caption}")
+            print(f"[OK] {no}. {name}{sent}: {res.caption.replace(chr(10), ' | ')}")
         except Exception as e:  # noqa: BLE001
             failures += 1
             reason = _short(e) if not isinstance(e, SourceError) else str(e)

@@ -28,6 +28,27 @@ def md(d: dt.date) -> str:
     return f"{d.month}/{d.day}"
 
 
+def previous_business_day(today: dt.date | None = None) -> dt.date:
+    """오늘(한국시간) 직전 평일. 토·일 새벽이면 금요일, 월요일 새벽이면 금요일."""
+    d = (today or today_kst()) - dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d
+
+
+def is_recent(d) -> bool:
+    """데이터 날짜가 오늘 또는 직전 영업일이면 True(캡션에 날짜를 쓰지 않는다)."""
+    d = d.date() if hasattr(d, "date") and callable(d.date) else d
+    return d >= previous_business_day()
+
+
+def date_suffix(d, monthly: bool = False) -> str:
+    """최근 1영업일 이내면 빈 문자열, 그보다 오래됐으면 'M/D'(월평균은 'M월')."""
+    if monthly:
+        return f"{d.month}월"
+    return "" if is_recent(d) else md(d)
+
+
 # ---------------------------------------------------------------------------
 # 한글 폰트
 # ---------------------------------------------------------------------------
@@ -78,6 +99,7 @@ class Message:
     text: str  # 텍스트 본문 또는 사진 캡션
     path: Path | None = None
     label: str = ""  # 로그용 이름
+    html: bool = False  # True면 text가 이미 텔레그램 HTML(이스케이프 완료)
 
 
 @dataclass
@@ -104,9 +126,9 @@ def send_messages(messages: list[Message], dry_run: bool = False) -> list[tuple[
     for m in messages:
         try:
             if m.kind == "photo":
-                mid = send_photo(m.path, m.text, dry_run=dry_run)
+                mid = send_photo(m.path, m.text, html=m.html, dry_run=dry_run)
             else:
-                mid = send_text(m.text, dry_run=dry_run)
+                mid = send_text(m.text, html=m.html, dry_run=dry_run)
             results.append((m, "dry-run" if mid is None else f"message_id={mid}"))
         except (TelegramError, OSError) as e:
             print(f"[telegram] 실패: {e} ({m.label})", file=sys.stderr)

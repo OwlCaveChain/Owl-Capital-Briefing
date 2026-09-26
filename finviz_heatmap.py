@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from briefing_common import OUT_DIR, UA, Message, Prepared, md, run_standalone, today_kst
+from briefing_common import OUT_DIR, UA, Message, Prepared, run_standalone
 
 NAME = "핀비즈 히트맵"
 FAIL_TEXT = "핀비즈 히트맵 확인 실패"
@@ -82,7 +82,6 @@ def prepare() -> Prepared:
 
     ensure_proxy_ca()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    date = f"{md(today_kst())} 기준"
     messages, errors, failed = [], [], []
     with sync_playwright() as pw:
         kw = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
@@ -96,7 +95,7 @@ def prepare() -> Prepared:
                 out = OUT_DIR / fname
                 try:
                     capture(page, url, out)
-                    messages.append(Message("photo", f"{date} S&P 500 히트맵 ({label})", out, label))
+                    messages.append(Message("photo", f"S&P 500 히트맵 ({label})", out, label))
                 except Exception as e:  # noqa: BLE001
                     failed.append(label)
                     errors.append(f"{label} {type(e).__name__}: {e}"[:200])

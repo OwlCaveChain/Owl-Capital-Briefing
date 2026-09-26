@@ -23,6 +23,9 @@ python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡�
 
 모든 스크립트가 이 모듈로 보낸다. 토큰은 `TELEGRAM_BOT_TOKEN`, 채팅 ID는 `TELEGRAM_CHAT_ID`(없거나 "chat not found"면 기본값 7164046356).
 토큰이 없으면 dry-run으로 동작한다. 성공할 때마다 `[telegram] ok message_id=N` 을 출력한다.
+전송은 항상 `parse_mode=HTML`(링크 미리보기 끔). `html=False`(기본)면 본문을 자동 이스케이프하고, dry-run은 텔레그램에 보일 글자 그대로 출력한다.
+
+캡션 규칙: 첫 줄 제목, 시리즈마다 한 줄, 출처는 캡션에 쓰지 않고 실행 로그(`[출처]`)에만 남긴다. 날짜는 직전 영업일보다 오래된 값에만 `(9/22)`처럼 붙인다.
 
 ```
 python telegram_send.py check

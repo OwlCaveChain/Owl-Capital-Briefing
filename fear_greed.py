@@ -6,14 +6,13 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import math
 import sys
 from zoneinfo import ZoneInfo
 
 import requests
 
-from briefing_common import OUT_DIR, UA, Message, Prepared, md, run_standalone, setup_korean_font, today_kst
+from briefing_common import OUT_DIR, UA, Message, Prepared, run_standalone, setup_korean_font
 
 NAME = "Fear & Greed"
 FAIL_TEXT = "Fear & Greed 항목 확인 실패"
@@ -76,8 +75,11 @@ def family(name: str) -> str:
     return "fear" if "Fear" in name else "greed" if "Greed" in name else "neutral"
 
 
-def history_line(v: dict[str, int]) -> str:
-    return " / ".join(f"{label} {v[key]}" for key, label in HISTORY)
+def caption(v: dict[str, int]) -> str:
+    """두 줄: '전일 → 현재 · 구간' / '1주 전 N / 1개월 전 N / 1년 전 N'."""
+    first = f"{v['previous_close']} → {v['score']} · {zone(v['score'])}"
+    second = " / ".join(f"{label} {v[key]}" for key, label in HISTORY[1:])
+    return f"{first}\n{second}"
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ def history_line(v: dict[str, int]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def draw_gauge(v: dict[str, int], asof_et: dt.datetime):
+def draw_gauge(v: dict[str, int]):
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
     from matplotlib.patches import Circle, Polygon, Wedge
@@ -95,7 +97,7 @@ def draw_gauge(v: dict[str, int], asof_et: dt.datetime):
     FigureCanvasAgg(fig)
     ax = fig.add_axes([0.03, 0.02, 0.94, 0.96])
     ax.set_xlim(-1.2, 1.2)
-    ax.set_ylim(-1.32, 1.08)
+    ax.set_ylim(-1.08, 1.32)
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -162,8 +164,8 @@ def draw_gauge(v: dict[str, int], asof_et: dt.datetime):
                 linestyle=(0, (1, 3)), dash_capstyle="round")
         ax.plot([x0, x0 + width], [y0 - 0.265] * 2, color="#EEEEEE", lw=1)
 
-    ax.text(0, -1.22, f"기준: {asof_et.month}/{asof_et.day} {asof_et:%H:%M} (미 동부시간)",
-            ha="center", va="center", fontsize=10.5, color="#8A8A8A")
+    ax.text(0, 1.22, "Fear & Greed Index", ha="center", va="center", fontsize=22, fontweight=BOLD,
+            color="#111111", path_effects=heavy("#111111", 0.8))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / "m1_fear_greed.png"
@@ -233,22 +235,17 @@ def prepare() -> Prepared:
     data = fetch()
     fg = data["fear_and_greed"]
     v = {"score": cnn_int(fg["score"]), **{k: cnn_int(fg[k]) for k, _ in HISTORY}}
-    s = v["score"]
-    date = md(today_kst())
-    cap = f"Fear & Greed 지수 ({date} 기준)\n현재 {s} · {zone(s)}\n{history_line(v)}"
-    if s <= 25 or s >= 75:
-        cap += "\n※ 극단 구간"
+    cap = caption(v)
 
     messages, errors = [], []
     try:
-        asof = dt.datetime.fromisoformat(fg["timestamp"]).astimezone(ET)
-        messages.append(Message("photo", cap, draw_gauge(v, asof), "게이지"))
+        messages.append(Message("photo", cap, draw_gauge(v), "게이지"))
     except Exception as e:  # noqa: BLE001  이미지 실패 시 캡션을 텍스트로
-        messages.append(Message("text", cap, label="게이지(텍스트 대체)"))
+        messages.append(Message("text", f"Fear & Greed Index\n{cap}", label="게이지(텍스트 대체)"))
         errors.append(f"게이지 이미지 실패: {type(e).__name__}: {e}")
     try:
         path = draw_timeline(history_series(data))
-        messages.append(Message("photo", f"Fear & Greed 1년 추이 ({date} 기준) · 현재 {s}", path, "1-2 타임라인"))
+        messages.append(Message("photo", "Fear & Greed 1년 추이", path, "1-2 타임라인"))
     except Exception as e:  # noqa: BLE001
         messages.append(Message("text", "Fear & Greed 타임라인 확인 실패", label="1-2 타임라인 실패 알림"))
         errors.append(f"타임라인 실패: {type(e).__name__}: {e}")
