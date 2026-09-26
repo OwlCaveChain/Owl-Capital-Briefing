@@ -2,10 +2,11 @@
 
 메시지 1~6의 이미지·캡션과 블로그 새 글 목록을 다시 만들어
 docs/<오늘 날짜>.html 을 쓰고, index.html 을 그 페이지로 바꾸고, archive.html 에 날짜를 추가한다.
+모든 HTML에 검색 제외 표시(noindex)를 넣어 검색 결과에 나오지 않게 한다(링크를 아는 사람만).
 이미지는 docs/charts/<날짜>-<이름>.png 로 복사한다. 끝나면 docs/ 전체에 비밀값이 없는지 검사한다.
 
   python site_build.py            생성 + 비밀값 검사
-  python site_build.py --check    비밀값 검사만
+  python site_build.py --check    비밀값·noindex 검사만
 
 git 커밋·푸시는 하지 않는다.
 블로그 한 줄 요약은 사람이 쓴 것만 쓴다: 같은 날짜 페이지가 이미 있으면 같은 글 URL의 요약을 이어 쓴다.
@@ -33,6 +34,8 @@ from briefing_common import ROOT, Message, now_kst, prepare_safely, setup_korean
 DOCS = ROOT / "docs"
 CHART_DIR = DOCS / "charts"
 WEEKDAYS = "월화수목금토일"
+# 검색 결과에 나오지 않게(링크를 아는 사람만). robots.txt 로 막으면 이 표시를 못 읽으니 막지 않는다.
+NOINDEX = '<meta name="robots" content="noindex, nofollow, noarchive">'
 
 # 비밀값 검사: 이름에 이런 말이 들어간 환경변수 값이 docs/ 에 있으면 실패
 SECRET_ENV = re.compile(r"TOKEN|KEY|SECRET|PASS|AUTH|CREDENTIAL|CHAT_ID", re.I)
@@ -86,6 +89,7 @@ HEAD = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+{noindex}
 <title>{title}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦉</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Noto+Sans+KR:wght@400;700&display=swap">
@@ -210,7 +214,7 @@ def section(no: int, title: str, body: str) -> str:
 def build_page(date_key: str, date_label: str, stamp: str, msgs: dict[int, list[Message]],
                chart_msgs: list[tuple[str, Message]], blogs, failed_blogs, summaries: dict[str, str]) -> tuple[str, set]:
     page = Page(date_key)
-    parts = [HEAD.format(title=f"Owl Capital 아침 브리핑 · {date_label}", style=STYLE),
+    parts = [HEAD.format(title=f"Owl Capital 아침 브리핑 · {date_label}", style=STYLE, noindex=NOINDEX),
              f'  <header>\n    <h1>🦉 Owl Capital 아침 브리핑</h1>\n'
              f'    <div class="date">{esc(date_label)} · {esc(stamp)} 생성</div>\n  </header>\n\n']
 
@@ -254,6 +258,23 @@ def build_page(date_key: str, date_label: str, stamp: str, msgs: dict[int, list[
 
     parts.append(FOOT.format(footer='<a href="archive.html">지난 브리핑 보기</a>'))
     return "".join(parts), page.used
+
+
+def ensure_noindex(path: Path) -> bool:
+    """HTML <head> 에 검색 제외 표시가 없으면 넣는다. 넣었으면 True."""
+    text = path.read_text(encoding="utf-8")
+    if 'name="robots"' in text:
+        return False
+    head = re.search(r'<meta charset="[^"]*">\n', text) or re.search(r"<head>\n", text)
+    if not head:
+        raise ValueError(f"{path.name}: <head> 를 찾지 못함")
+    path.write_text(text[:head.end()] + NOINDEX + "\n" + text[head.end():], encoding="utf-8")
+    return True
+
+
+def missing_noindex(root: Path = DOCS) -> list[str]:
+    return [str(p.relative_to(ROOT)) for p in sorted(root.rglob("*.html"))
+            if NOINDEX not in p.read_text(encoding="utf-8")]
 
 
 def update_archive(date_key: str) -> None:
@@ -308,6 +329,11 @@ def report_secrets() -> int:
         print("[검사] 비밀값 발견:\n  " + "\n  ".join(found), file=sys.stderr)
         return 1
     print("[검사] 비밀값 없음")
+    miss = missing_noindex()
+    if miss:
+        print("[검사] 검색 제외 표시(noindex) 없음: " + ", ".join(miss), file=sys.stderr)
+        return 1
+    print("[검사] 모든 HTML에 검색 제외 표시(noindex) 있음")
     return 0
 
 
@@ -340,6 +366,8 @@ def main() -> int:
     (DOCS / "index.html").write_text(text, encoding="utf-8")
     update_archive(date_key)
     remove_stale_images(date_key, used)
+    for f in DOCS.glob("*.html"):
+        ensure_noindex(f)
     print(f"[사이트] {page_path.relative_to(ROOT)}, index.html 갱신, 이미지 {len(used)}장")
     return report_secrets()
 

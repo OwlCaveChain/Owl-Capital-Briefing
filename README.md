@@ -111,6 +111,8 @@ python site_build.py --check  # docs/ 비밀값 검사만
 - 블로그 한 줄 요약은 자동으로 만들지 않는다. 같은 날짜 페이지에 이미 있던 요약만 같은 글 URL에 이어 붙인다.
 - 비밀값 검사: 이름에 TOKEN·KEY·SECRET·PASS·AUTH·CHAT_ID 가 들어간 환경변수 값이 docs/ 파일(이미지 포함)에 있는지,
   텔레그램·GitHub·AWS·Anthropic 토큰 형식과 `api.telegram.org/bot` 주소가 HTML에 있는지 본다. 찾으면 종료 코드 1(값은 출력하지 않음).
+- 모든 HTML `<head>`에 `<meta name="robots" content="noindex, nofollow, noarchive">`를 넣어 검색 결과에 나오지 않게 한다(링크를 아는 사람만).
+  `--check`는 이 표시가 빠진 HTML이 있어도 실패한다. robots.txt로 막으면 검색엔진이 이 표시를 못 읽으므로 막지 않는다.
 - git 커밋·푸시는 하지 않는다.
 
 ## data/ 보존: 모든 브랜치에서 합치기 (`data_merge.py`, `cleanup_data.py`)
