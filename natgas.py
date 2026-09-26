@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 
-from briefing_common import (OUT_DIR, Message, Prepared, add_title, date_suffix, log_price_axis, pct_change,
+from briefing_common import (OUT_DIR, Message, Prepared, date_suffix, log_price_axis, pct_change,
                              run_standalone, setup_korean_font)
 
 NAME = "미 천연가스"
@@ -43,8 +43,6 @@ def draw(s):
 
     fig = Figure(figsize=(10, 5.5), facecolor="white")
     ax = fig.add_subplot()
-    fig.subplots_adjust(top=0.86)
-    add_title(fig, "미 천연가스")
     ax.plot(s.index, s.values, color="black", lw=3.0, label="미 천연가스(헨리허브 선물)")
     ax.legend(loc="upper center", frameon=False, fontsize=12)
     ax.grid(False)
@@ -67,7 +65,7 @@ def prepare() -> Prepared:
     when = date_suffix(d)
     if when:
         extra += f", {when}"
-    cap = f"${last:.3f}/MMBtu ({extra})"  # 제목은 그림 안에
+    cap = f"${last:.3f}/MMBtu ({extra})"
     return Prepared([Message("photo", cap, draw(s), "차트")])
 
 

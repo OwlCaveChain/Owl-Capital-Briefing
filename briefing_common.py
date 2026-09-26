@@ -107,24 +107,6 @@ def add_title(fig, text: str, x: float = 0.015, y: float = 0.975, fontsize: floa
              path_effects=[patheffects.withStroke(linewidth=0.8, foreground="#111111")])
 
 
-def add_title_band(path: Path, text: str) -> None:
-    """스크린샷(PNG) 위에 흰 띠를 붙이고 왼쪽 위에 굵은 제목을 쓴다(matplotlib 차트 제목과 같은 비율)."""
-    from PIL import Image, ImageDraw, ImageFont
-
-    im = Image.open(path).convert("RGB")
-    w, h = im.size
-    size = round(w * 0.0236)  # add_title: 그림 폭의 약 2.4%
-    band = round(size * 2.1)
-    bold = next((p for p in [NANUM_PATH.with_name("NanumGothicBold.ttf"), *Path("/usr/share/fonts").rglob(
-        "NanumGothicBold.ttf")] if p.exists()), None)
-    font = ImageFont.truetype(str(bold), size) if bold else ImageFont.load_default()
-    out = Image.new("RGB", (w, h + band), "white")
-    out.paste(im, (0, band))
-    ImageDraw.Draw(out).text((round(w * 0.015), band // 2), text, font=font, fill="#111111", anchor="lm",
-                             stroke_width=max(1, size // 28), stroke_fill="#111111")
-    out.save(path)
-
-
 def _nice_log_ticks(lo: float, hi: float) -> list[float]:
     """lo~hi 안의 보기 좋은 눈금 4~8개. 범위가 넓으면 1·2·5×10^k 계열, 좁으면 등간격."""
     import math

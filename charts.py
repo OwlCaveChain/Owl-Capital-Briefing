@@ -54,7 +54,7 @@ import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 
 import telegram_send  # noqa: E402
-from briefing_common import add_title, date_suffix, log_price_axis, pct_change, setup_korean_font  # noqa: E402
+from briefing_common import date_suffix, log_price_axis, pct_change, setup_korean_font  # noqa: E402
 
 KST = dt.timezone(dt.timedelta(hours=9))
 TODAY = dt.datetime.now(KST).date()
@@ -353,7 +353,7 @@ def store_series(key: str, s: pd.Series) -> pd.Series:
 
 def new_figure():
     fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
-    fig.subplots_adjust(left=0.07, right=0.93, top=0.86, bottom=0.08)
+    fig.subplots_adjust(left=0.07, right=0.93, top=0.9, bottom=0.08)
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
     ax.grid(False)
@@ -379,17 +379,18 @@ def date_axis(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
     ax.set_xlim(start, end + pd.Timedelta(days=max(3, months)))
 
 
-def legend(ax, handles=None) -> None:
+def legend(ax, handles=None, title: str | None = None) -> None:
+    """범례. title은 범례 위에 같은 크기로 작게(그림에 따로 큰 제목을 두지 않는다)."""
     kw = dict(loc="upper left", frameon=False, fontsize=12, handlelength=2.2)
+    if title:
+        kw.update(title=title, title_fontsize=12, alignment="left")
     if handles:
         ax.legend(handles=handles, labels=[h.get_label() for h in handles], **kw)
     else:
         ax.legend(**kw)
 
 
-def save(fig, name: str, title: str) -> Path:
-    """제목은 그림 왼쪽 위에 굵게 넣는다(캡션에는 숫자만)."""
-    add_title(fig, title)
+def save(fig, name: str) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.png"
     fig.savefig(path, facecolor="white", dpi=100)
@@ -484,7 +485,7 @@ def chart_spread() -> ChartResult:
     legend(ax)
     title = "미 10Y-2Y 스프레드"
     cap = caption(title, [latest(s, '.2f', '%p')], [f.source])
-    return ChartResult(save(fig, "1_spread", title), cap)
+    return ChartResult(save(fig, "1_spread"), cap)
 
 
 def chart_10y() -> ChartResult:
@@ -521,11 +522,11 @@ def chart_10y() -> ChartResult:
         raise SourceError("모든 국가 데이터 수집 실패")
     unit_label(ax, "(%)")
     date_axis(ax, pd.Timestamp(start), last)
-    legend(ax)
+    legend(ax, title="주요국 10년 국채금리")
     order = ["미국", "한국", "일본", "중국"]
     title = "주요국 10년 국채금리"
     cap = caption(title, [lines[c] for c in order if c in lines], sources)
-    return ChartResult(save(fig, "2_10y", title), cap)
+    return ChartResult(save(fig, "2_10y"), cap)
 
 
 def brent_spot_premium(futures: pd.Series) -> str | None:
@@ -592,13 +593,13 @@ def chart_oil() -> ChartResult:
     unit_label(ax, "(달러/배럴)")
     log_price_axis(ax, pd.concat(plotted).values)
     date_axis(ax, pd.Timestamp(start), last)
-    legend(ax)
+    legend(ax, title="유가")
     premium = brent_spot_premium(brent) if brent is not None else None
     if premium:
         sources.append("FRED")
     title = "유가"
     cap = caption(title, parts + missing + ([premium] if premium else []), sources)
-    return ChartResult(save(fig, "3_oil", title), cap)
+    return ChartResult(save(fig, "3_oil"), cap)
 
 
 def chart_gasoline() -> ChartResult:
@@ -613,7 +614,7 @@ def chart_gasoline() -> ChartResult:
     legend(ax)
     title = "미 가솔린 소매가격"
     cap = caption(title, [latest(s, '.2f', '/갤런', prefix='$', pct=True)], [f.source])
-    return ChartResult(save(fig, "4_gasoline", title), cap)
+    return ChartResult(save(fig, "4_gasoline"), cap)
 
 
 def _stock_chain(ticker: str, stooq_symbol: str, start: dt.date):
@@ -647,7 +648,7 @@ def chart_dtcr_nvda() -> ChartResult:
     title = "데이터센터 ETF · 엔비디아"
     cap = caption(title, [f"DTCR {latest(sa, '.2f', prefix='$', pct=True)}",
                           f"NVDA {latest(sb, '.2f', prefix='$', pct=True)}"], [a.source, b.source])
-    return ChartResult(save(fig, "5_dtcr_nvda", title), cap)
+    return ChartResult(save(fig, "5_dtcr_nvda"), cap)
 
 
 def chart_ibb_sox() -> ChartResult:
@@ -672,7 +673,7 @@ def chart_ibb_sox() -> ChartResult:
     title = "바이오테크 · 반도체 (연초=100)"
     cap = caption(title, [f"IBB {latest(ra, '.1f', pct=True)}", f"SOX {latest(rb, '.1f', pct=True)}"],
                   [a.source, b.source])
-    return ChartResult(save(fig, "6_ibb_sox", title), cap)
+    return ChartResult(save(fig, "6_ibb_sox"), cap)
 
 
 CHARTS = [
