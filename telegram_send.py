@@ -13,6 +13,7 @@ dry-run은 텔레그램에 보일 모양(태그를 뺀 글자)을 그대로 출�
   python telegram_send.py check
   python telegram_send.py text "본문"          (여러 줄: printf '%s' "본문" | python telegram_send.py text -)
   python telegram_send.py photo 파일.png "캡션"
+  python telegram_send.py album 1.png 2.png    (앨범, 캡션 없음)
   성공하면 "ok message_id=N", 실패하면 "실패: 사유" 를 출력한다.
 
 환경변수
@@ -102,7 +103,7 @@ def _chat_ids() -> list[str]:
     return list(dict.fromkeys([c for c in (env, DEFAULT_CHAT_ID) if c]))
 
 
-def _call(method: str, data: dict, files_path: Path | None = None) -> dict:
+def _call(method: str, data: dict, files: dict[str, Path] | None = None):
     """채팅 ID 후보를 차례로 쓰고, 일시 오류는 한 번 더 시도한다. 성공 시 result 객체.
 
     HTML 해석 오류("can't parse entities")면 태그를 뺀 글자로 한 번 더 보낸다.
@@ -116,10 +117,14 @@ def _call(method: str, data: dict, files_path: Path | None = None) -> dict:
         payload = {**data, "chat_id": chat_id}
         for attempt in range(3):
             try:
-                if files_path is not None:
-                    with open(files_path, "rb") as fh:
+                if files:
+                    handles = {k: open(p, "rb") for k, p in files.items()}
+                    try:
                         r = requests.post(url, data=payload, timeout=TIMEOUT,
-                                          files={"photo": (files_path.name, fh, "image/png")})
+                                          files={k: (files[k].name, fh, "image/png") for k, fh in handles.items()})
+                    finally:
+                        for fh in handles.values():
+                            fh.close()
                 else:
                     r = requests.post(url, data=payload, timeout=TIMEOUT)
                 j = r.json()
@@ -183,10 +188,28 @@ def send_photo(path: str | Path, caption: str = "", *, html: bool = False, dry_r
         _dry_run_print(f"사진 {path.name}", body)
         return None
     data = {"caption": body, "parse_mode": "HTML"} if body else {}  # 제목이 그림 안에 있으면 캡션 없음
-    res = _call("sendPhoto", data, files_path=path)
+    res = _call("sendPhoto", data, files={"photo": path})
     mid = res.get("message_id")
     print(f"[telegram] ok message_id={mid} (사진 {path.name})")
     return mid
+
+
+def send_media_group(paths: list[str | Path], *, dry_run: bool = False) -> int | None:
+    """사진 여러 장을 앨범 하나로(sendMediaGroup, 캡션 없음). 첫 사진의 message_id를 돌려준다."""
+    import json
+
+    paths = [Path(p) for p in paths]
+    if len(paths) == 1:
+        return send_photo(paths[0], "", dry_run=dry_run)
+    if dry_run or not enabled():
+        _dry_run_print("앨범 " + ", ".join(p.name for p in paths), "")
+        return None
+    media = [{"type": "photo", "media": f"attach://p{i}"} for i in range(len(paths))]
+    res = _call("sendMediaGroup", {"media": json.dumps(media)},
+                files={f"p{i}": p for i, p in enumerate(paths)})
+    mids = [m.get("message_id") for m in res]
+    print(f"[telegram] ok message_id={','.join(map(str, mids))} (앨범 {', '.join(p.name for p in paths)})")
+    return mids[0] if mids else None
 
 
 def check() -> str:
@@ -196,7 +219,7 @@ def check() -> str:
 
 
 def _main(argv: list[str]) -> int:
-    if not argv or argv[0] not in ("check", "text", "photo"):
+    if not argv or argv[0] not in ("check", "text", "photo", "album"):
         print(__doc__)
         return 2
     try:
@@ -209,6 +232,8 @@ def _main(argv: list[str]) -> int:
         if argv[0] == "text":
             text = sys.stdin.read() if len(argv) < 2 or argv[1] == "-" else argv[1]
             mid = send_text(text)
+        elif argv[0] == "album":
+            mid = send_media_group(argv[1:])
         else:
             mid = send_photo(argv[1], argv[2] if len(argv) > 2 else "")
         print(f"ok message_id={mid}")

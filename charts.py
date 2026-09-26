@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import functools
 import io
+import json
 import os
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 OUT_DIR = ROOT / "out"
+MANIFEST = "charts.json"  # 이번 실행의 차트 이미지·캡션 목록(site_build.py 가 읽는다)
 
 
 def _ensure_packages() -> None:
@@ -764,11 +766,13 @@ def main() -> int:
 
     only = {int(x) for x in args.only.split(",") if x.strip()}
     failures = 0
+    manifest = []  # 사이트(site_build.py)가 같은 이미지를 다시 쓰도록 out/charts.json 에 남긴다
     for no, name, fn in CHARTS:
         if only and no not in only:
             continue
         try:
             res = fn()
+            manifest.append({"name": name, "kind": "photo", "path": str(res.path), "text": res.caption})
             mid = tg.photo(res.path, res.caption)
             sent = "" if mid is None else f" (message_id={mid})"
             print(f"[OK] {no}. {name}{sent}: {res.caption.replace(chr(10), ' | ')}")
@@ -777,10 +781,14 @@ def main() -> int:
             reason = _short(e) if not isinstance(e, SourceError) else str(e)
             print(f"[실패] {no}. {name}: {reason}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
+            if not manifest or manifest[-1]["name"] != name:
+                manifest.append({"name": name, "kind": "text", "text": f"{name} 차트 생성 실패: {reason}"})
             try:
                 tg.text(f"{name} 차트 생성 실패: {reason}")
             except Exception as e2:  # noqa: BLE001
                 print(f"[실패] 실패 알림 전송도 실패: {_short(e2)}", file=sys.stderr)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
 
     if not args.no_commit:
         commit_data()
