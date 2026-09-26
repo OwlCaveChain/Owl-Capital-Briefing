@@ -144,7 +144,7 @@ def prepare() -> Prepared:
         if posts:
             blocks.append(group_block(name, posts, more_url))
             total += len(posts)
-    header = f"블로그 새 글 {total}건" if total else "블로그 새 글 없음"
+    header = f"🌞 블로그 새 글 {total}건" if total else "🌞 블로그 새 글 없음"
     footer = "확인 실패: " + esc(", ".join(failed)) if failed else ""
     chunks = split_messages(header, blocks, footer)
     return Prepared([Message("text", c, label=f"새 글 목록{i + 1 if len(chunks) > 1 else ''}", html=True)

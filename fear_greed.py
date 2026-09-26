@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from briefing_common import OUT_DIR, UA, Message, Prepared, run_standalone, setup_korean_font
+from briefing_common import OUT_DIR, UA, Message, Prepared, add_title, run_standalone, setup_korean_font
 
 NAME = "Fear & Greed"
 FAIL_TEXT = "Fear & Greed 항목 확인 실패"
@@ -75,11 +75,14 @@ def family(name: str) -> str:
     return "fear" if "Fear" in name else "greed" if "Greed" in name else "neutral"
 
 
-def caption(v: dict[str, int]) -> str:
-    """두 줄: '전일 → 현재 · 구간' / '1주 전 N / 1개월 전 N / 1년 전 N'."""
-    first = f"{v['previous_close']} → {v['score']} · {zone(v['score'])}"
-    second = " / ".join(f"{label} {v[key]}" for key, label in HISTORY[1:])
-    return f"{first}\n{second}"
+def gauge_caption(v: dict[str, int]) -> str:
+    """게이지 캡션: '전일 → 현재'."""
+    return f"{v['previous_close']} → {v['score']}"
+
+
+def timeline_caption(v: dict[str, int]) -> str:
+    """타임라인 캡션: '1주 전 N / 1개월 전 N / 1년 전 N'."""
+    return " / ".join(f"{label} {v[key]}" for key, label in HISTORY[1:])
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +96,14 @@ def draw_gauge(v: dict[str, int]):
     from matplotlib.patches import Circle, Polygon, Wedge
 
     s, z = v["score"], zone(v["score"])
-    fig = Figure(figsize=(8, 8.2), facecolor="white")
+    # 텔레그램 대화창에서 잘리지 않도록 가로형(약 1.4:1). 제목은 반원 왼쪽 위 빈 공간에 둔다.
+    xlim, ylim = (-1.2, 1.2), (-0.64, 1.05)
+    width_in = 8.0
+    fig = Figure(figsize=(width_in, width_in * (ylim[1] - ylim[0]) / (xlim[1] - xlim[0])), facecolor="white")
     FigureCanvasAgg(fig)
-    ax = fig.add_axes([0.03, 0.02, 0.94, 0.96])
-    ax.set_xlim(-1.2, 1.2)
-    ax.set_ylim(-1.08, 1.32)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -143,33 +149,34 @@ def draw_gauge(v: dict[str, int]):
     ax.text(0, -0.005, str(s), ha="center", va="center", fontsize=34, fontweight=BOLD, zorder=7,
             path_effects=heavy("black", 0.9))
 
-    # 2x2 표: 전일 / 1주 전 / 1개월 전 / 1년 전
+    # 2x2 표(한 칸 한 줄): 라벨 · 구간 이름 ····· (값)
     renderer = fig.canvas.get_renderer()
     inv = ax.transData.inverted()
-    cells = [(-1.12, -0.36), (0.1, -0.36), (-1.12, -0.74), (0.1, -0.74)]
-    width, badge_r = 1.02, 0.085
+    cells = [(-1.13, -0.33), (0.09, -0.33), (-1.13, -0.54), (0.09, -0.54)]
+    width, badge_r, name_dx = 1.04, 0.075, 0.27
     for (key, label), (x0, y0) in zip(HISTORY, cells):
         val = v[key]
         name = zone(val)
         fill, edge = STYLE[family(name)]
-        ax.text(x0, y0, label, ha="left", va="center", fontsize=11, color="#777777")
-        name_t = ax.text(x0, y0 - 0.15, name, ha="left", va="center", fontsize=14, fontweight=BOLD,
+        ax.text(x0, y0, label, ha="left", va="center", fontsize=12, color="#777777")
+        name_t = ax.text(x0 + name_dx, y0, name, ha="left", va="center", fontsize=15, fontweight=BOLD,
                          color="#222222", path_effects=heavy("#222222", 0.45))
         bx = x0 + width - badge_r
-        ax.add_patch(Circle((bx, y0 - 0.15), badge_r, facecolor=fill, edgecolor=edge, lw=2))
-        ax.text(bx, y0 - 0.155, str(val), ha="center", va="center", fontsize=13, fontweight=BOLD,
+        ax.add_patch(Circle((bx, y0), badge_r, facecolor=fill, edgecolor=edge, lw=2))
+        ax.text(bx, y0 - 0.005, str(val), ha="center", va="center", fontsize=13, fontweight=BOLD,
                 color="#222222", path_effects=heavy("#222222", 0.35))
         text_end = inv.transform(name_t.get_window_extent(renderer))[1][0]
-        ax.plot([text_end + 0.04, bx - badge_r - 0.04], [y0 - 0.15] * 2, color="#BBBBBB", lw=1.4,
-                linestyle=(0, (1, 3)), dash_capstyle="round")
-        ax.plot([x0, x0 + width], [y0 - 0.265] * 2, color="#EEEEEE", lw=1)
+        if bx - badge_r - text_end > 0.12:
+            ax.plot([text_end + 0.04, bx - badge_r - 0.04], [y0] * 2, color="#BBBBBB", lw=1.4,
+                    linestyle=(0, (1, 3)), dash_capstyle="round")
+        if y0 == cells[0][1]:  # 두 줄 사이 구분선
+            ax.plot([x0, x0 + width], [y0 - 0.105] * 2, color="#EEEEEE", lw=1)
 
-    ax.text(0, 1.22, "Fear & Greed Index", ha="center", va="center", fontsize=22, fontweight=BOLD,
-            color="#111111", path_effects=heavy("#111111", 0.8))
+    add_title(fig, "Fear & Greed Index", fontsize=19)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / "m1_fear_greed.png"
-    fig.savefig(path, dpi=150, facecolor="white")
+    fig.savefig(path, dpi=180, facecolor="white")
     return path
 
 
@@ -194,9 +201,10 @@ def draw_timeline(s):
     from matplotlib.figure import Figure
     from matplotlib.ticker import FixedLocator
 
-    fig = Figure(figsize=(10, 5), facecolor="white")
+    fig = Figure(figsize=(10, 5.4), facecolor="white")
     FigureCanvasAgg(fig)
-    ax = fig.add_axes([0.03, 0.1, 0.9, 0.85])
+    ax = fig.add_axes([0.03, 0.1, 0.9, 0.78])
+    add_title(fig, "Fear & Greed 1년 추이")
     ax.set_ylim(0, 100)
     ax.set_xlim(s.index[0], s.index[-1])
     for level in (25, 50, 75):
@@ -235,17 +243,16 @@ def prepare() -> Prepared:
     data = fetch()
     fg = data["fear_and_greed"]
     v = {"score": cnn_int(fg["score"]), **{k: cnn_int(fg[k]) for k, _ in HISTORY}}
-    cap = caption(v)
 
     messages, errors = [], []
     try:
-        messages.append(Message("photo", cap, draw_gauge(v), "게이지"))
+        messages.append(Message("photo", gauge_caption(v), draw_gauge(v), "게이지"))
     except Exception as e:  # noqa: BLE001  이미지 실패 시 캡션을 텍스트로
-        messages.append(Message("text", f"Fear & Greed Index\n{cap}", label="게이지(텍스트 대체)"))
+        messages.append(Message("text", f"Fear & Greed Index\n{gauge_caption(v)}", label="게이지(텍스트 대체)"))
         errors.append(f"게이지 이미지 실패: {type(e).__name__}: {e}")
     try:
         path = draw_timeline(history_series(data))
-        messages.append(Message("photo", "Fear & Greed 1년 추이", path, "1-2 타임라인"))
+        messages.append(Message("photo", timeline_caption(v), path, "1-2 타임라인"))
     except Exception as e:  # noqa: BLE001
         messages.append(Message("text", "Fear & Greed 타임라인 확인 실패", label="1-2 타임라인 실패 알림"))
         errors.append(f"타임라인 실패: {type(e).__name__}: {e}")

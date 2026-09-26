@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from briefing_common import OUT_DIR, Message, Prepared, date_suffix, run_standalone, setup_korean_font
+from briefing_common import (OUT_DIR, Message, Prepared, add_title, date_suffix, log_price_axis, pct_change,
+                             run_standalone, setup_korean_font)
 
 NAME = "미 천연가스"
 FAIL_TEXT = "미 천연가스 차트 확인 실패"
@@ -42,9 +43,12 @@ def draw(s):
 
     fig = Figure(figsize=(10, 5.5), facecolor="white")
     ax = fig.add_subplot()
+    fig.subplots_adjust(top=0.86)
+    add_title(fig, "미 천연가스")
     ax.plot(s.index, s.values, color="black", lw=3.0, label="미 천연가스(헨리허브 선물)")
     ax.legend(loc="upper center", frameon=False, fontsize=12)
     ax.grid(False)
+    log_price_axis(ax, s.values)
     ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m"))
     ax.text(0, 1.02, "(달러/MMBtu)", transform=ax.transAxes, fontsize=10)
@@ -59,12 +63,11 @@ def draw(s):
 def prepare() -> Prepared:
     s = fetch()
     last, prev, d = s.iloc[-1], s.iloc[-2], s.index[-1]
-    chg = last - prev
-    extra = f"{chg:+.3f}, {chg / prev * 100:+.1f}%"
+    extra = pct_change(last, prev)
     when = date_suffix(d)
     if when:
         extra += f", {when}"
-    cap = f"미 천연가스\n${last:.3f}/MMBtu ({extra})"
+    cap = f"${last:.3f}/MMBtu ({extra})"  # 제목은 그림 안에
     return Prepared([Message("photo", cap, draw(s), "차트")])
 
 

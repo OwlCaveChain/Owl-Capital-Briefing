@@ -50,12 +50,11 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager  # noqa: E402
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 
 import telegram_send  # noqa: E402
-from briefing_common import date_suffix  # noqa: E402
+from briefing_common import add_title, date_suffix, log_price_axis, pct_change, setup_korean_font  # noqa: E402
 
 KST = dt.timezone(dt.timedelta(hours=9))
 TODAY = dt.datetime.now(KST).date()
@@ -67,33 +66,6 @@ UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, 
 COLORS = ["#D62728", "#111111", "#FF8C00", "#F2C200"]
 LINE_WIDTH = 3.6  # 이미지 폭의 약 0.42%(1200px 기준 약 5px)
 
-
-# ---------------------------------------------------------------------------
-# 폰트
-# ---------------------------------------------------------------------------
-
-KOREAN_FONTS = ["NanumGothic", "NanumBarunGothic", "Noto Sans CJK KR", "Noto Sans KR", "UnDotum"]
-
-
-def setup_korean_font() -> str | None:
-    def find() -> str | None:
-        names = {f.name for f in font_manager.fontManager.ttflist}
-        return next((n for n in KOREAN_FONTS if n in names), None)
-
-    name = find()
-    if name is None:
-        # 폰트가 없으면 설치 후 캐시 재구성
-        cmd = "apt-get install -y -q fonts-nanum >/dev/null 2>&1 || (apt-get update -q >/dev/null 2>&1 && apt-get install -y -q fonts-nanum >/dev/null 2>&1)"
-        subprocess.run(cmd, shell=True, check=False)
-        for path in Path("/usr/share/fonts").rglob("Nanum*.ttf"):
-            font_manager.fontManager.addfont(str(path))
-        name = find()
-    if name:
-        plt.rcParams["font.family"] = name
-    else:
-        print("[경고] 한글 폰트를 찾지 못했습니다. 글자가 깨질 수 있습니다.", file=sys.stderr)
-    plt.rcParams["axes.unicode_minus"] = False
-    return name
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +353,7 @@ def store_series(key: str, s: pd.Series) -> pd.Series:
 
 def new_figure():
     fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
-    fig.subplots_adjust(left=0.07, right=0.93, top=0.9, bottom=0.08)
+    fig.subplots_adjust(left=0.07, right=0.93, top=0.86, bottom=0.08)
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
     ax.grid(False)
@@ -415,7 +387,9 @@ def legend(ax, handles=None) -> None:
         ax.legend(**kw)
 
 
-def save(fig, name: str) -> Path:
+def save(fig, name: str, title: str) -> Path:
+    """제목은 그림 왼쪽 위에 굵게 넣는다(캡션에는 숫자만)."""
+    add_title(fig, title)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.png"
     fig.savefig(path, facecolor="white", dpi=100)
@@ -441,12 +415,18 @@ def period_word(s: pd.Series) -> str:
     return "전일"
 
 
-def latest(s: pd.Series, fmt: str, unit: str = "", prefix: str = "", chg_unit: str | None = None) -> str:
-    """'$92.41 (-0.56)' 형태. 최근 1영업일보다 오래된 값만 '(+0.16, 9/21)'처럼 날짜를 붙인다."""
+def latest(s: pd.Series, fmt: str, unit: str = "", prefix: str = "", chg_unit: str | None = None,
+           pct: bool = False) -> str:
+    """'0.36%p (+0.05%p)' 형태. pct=True(가격)면 변화는 퍼센트만: '$92.41 (-2.3%)'.
+
+    최근 1영업일보다 오래된 값만 '(+3.7%, 9/21)'처럼 날짜를 붙인다.
+    """
     s = s.dropna()
     v, d = s.iloc[-1], s.index[-1]
     cu = unit if chg_unit is None else chg_unit
-    extra = [f"{v - s.iloc[-2]:+{fmt}}{cu}"] if len(s) > 1 else []
+    extra = []
+    if len(s) > 1:
+        extra.append(pct_change(v, s.iloc[-2]) if pct else f"{v - s.iloc[-2]:+{fmt}}{cu}")
     when = date_suffix(d, monthly=period_word(s) == "전월")
     if when:
         extra.append(when)
@@ -454,10 +434,10 @@ def latest(s: pd.Series, fmt: str, unit: str = "", prefix: str = "", chg_unit: s
 
 
 def caption(title: str, lines: list[str], sources: list[str]) -> str:
-    """첫 줄 제목, 시리즈마다 한 줄. 출처는 캡션에 넣지 않고 실행 로그에만 남긴다(대체 출처 확인용)."""
+    """시리즈마다 한 줄(제목은 그림 안에 있으므로 넣지 않는다). 출처는 실행 로그에만 남긴다(대체 출처 확인용)."""
     if sources:
         print(f"[출처] {title}: {', '.join(dict.fromkeys(sources))}")
-    return "\n".join([title, *lines])
+    return "\n".join(lines)
 
 
 def plot_x(s: pd.Series) -> pd.DatetimeIndex:
@@ -502,8 +482,9 @@ def chart_spread() -> ChartResult:
     unit_label(ax, "(%p)")
     date_axis(ax, s.index[0], s.index[-1])
     legend(ax)
-    cap = caption("미 10Y-2Y 스프레드", [latest(s, '.2f', '%p')], [f.source])
-    return ChartResult(save(fig, "1_spread"), cap)
+    title = "미 10Y-2Y 스프레드"
+    cap = caption(title, [latest(s, '.2f', '%p')], [f.source])
+    return ChartResult(save(fig, "1_spread", title), cap)
 
 
 def chart_10y() -> ChartResult:
@@ -542,8 +523,9 @@ def chart_10y() -> ChartResult:
     date_axis(ax, pd.Timestamp(start), last)
     legend(ax)
     order = ["미국", "한국", "일본", "중국"]
-    cap = caption("주요국 10년 국채금리", [lines[c] for c in order if c in lines], sources)
-    return ChartResult(save(fig, "2_10y"), cap)
+    title = "주요국 10년 국채금리"
+    cap = caption(title, [lines[c] for c in order if c in lines], sources)
+    return ChartResult(save(fig, "2_10y", title), cap)
 
 
 def brent_spot_premium(futures: pd.Series) -> str | None:
@@ -578,7 +560,7 @@ def chart_oil() -> ChartResult:
           ("fred_POILDUBUSDM", "FRED", lambda: fetch_fred("POILDUBUSDM"))]),
     ]
     fig, ax = new_figure()
-    parts, sources, missing = [], [], []
+    parts, sources, missing, plotted = [], [], [], []
     brent = None
     last = pd.Timestamp(start)
     for i, (name, label, chain) in enumerate(oils):
@@ -597,8 +579,9 @@ def chart_oil() -> ChartResult:
             label = f"{name}(월평균)"
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=label,
                 marker="o" if monthly else None, markersize=4)
-        parts.append(f"{name}(월평균) {latest(s, '.2f', prefix='$')}" if monthly
-                     else f"{name} {latest(s, '.2f', prefix='$')}")
+        parts.append(f"{name}(월평균) {latest(s, '.2f', prefix='$', pct=True)}" if monthly
+                     else f"{name} {latest(s, '.2f', prefix='$', pct=True)}")
+        plotted.append(s)
         sources.append(f.source)
         if name == "브렌트":
             brent = s
@@ -607,13 +590,15 @@ def chart_oil() -> ChartResult:
         plt.close(fig)
         raise SourceError("모든 유종 데이터 수집 실패")
     unit_label(ax, "(달러/배럴)")
+    log_price_axis(ax, pd.concat(plotted).values)
     date_axis(ax, pd.Timestamp(start), last)
     legend(ax)
     premium = brent_spot_premium(brent) if brent is not None else None
     if premium:
         sources.append("FRED")
-    cap = caption("유가", parts + missing + ([premium] if premium else []), sources)
-    return ChartResult(save(fig, "3_oil"), cap)
+    title = "유가"
+    cap = caption(title, parts + missing + ([premium] if premium else []), sources)
+    return ChartResult(save(fig, "3_oil", title), cap)
 
 
 def chart_gasoline() -> ChartResult:
@@ -623,10 +608,12 @@ def chart_gasoline() -> ChartResult:
     fig, ax = new_figure()
     ax.plot(s.index, s.values, color=COLORS[0], lw=LINE_WIDTH, label="미 가솔린 소매가격")
     unit_label(ax, "(달러/갤런)")
+    log_price_axis(ax, s.values)
     date_axis(ax, s.index[0], s.index[-1])
     legend(ax)
-    cap = caption("미 가솔린 소매가격", [latest(s, '.2f', '/갤런', prefix='$', chg_unit='')], [f.source])
-    return ChartResult(save(fig, "4_gasoline"), cap)
+    title = "미 가솔린 소매가격"
+    cap = caption(title, [latest(s, '.2f', '/갤런', prefix='$', pct=True)], [f.source])
+    return ChartResult(save(fig, "4_gasoline", title), cap)
 
 
 def _stock_chain(ticker: str, stooq_symbol: str, start: dt.date):
@@ -653,12 +640,14 @@ def chart_dtcr_nvda() -> ChartResult:
     h2, = ax2.plot(sb.index, sb.values, color=COLORS[1], lw=LINE_WIDTH, label="엔비디아 NVDA(우)")
     unit_label(ax, "(달러)")
     unit_label(ax2, "(달러)", right=True)
+    log_price_axis(ax, sa.values)
+    log_price_axis(ax2, sb.values)
     date_axis(ax, min(sa.index[0], sb.index[0]), max(sa.index[-1], sb.index[-1]))
     legend(ax, [h1, h2])
-    cap = caption("데이터센터 ETF · 엔비디아",
-                  [f"DTCR {latest(sa, '.2f', prefix='$')}", f"NVDA {latest(sb, '.2f', prefix='$')}"],
-                  [a.source, b.source])
-    return ChartResult(save(fig, "5_dtcr_nvda"), cap)
+    title = "데이터센터 ETF · 엔비디아"
+    cap = caption(title, [f"DTCR {latest(sa, '.2f', prefix='$', pct=True)}",
+                          f"NVDA {latest(sb, '.2f', prefix='$', pct=True)}"], [a.source, b.source])
+    return ChartResult(save(fig, "5_dtcr_nvda", title), cap)
 
 
 def chart_ibb_sox() -> ChartResult:
@@ -677,11 +666,13 @@ def chart_ibb_sox() -> ChartResult:
     ax.plot(rb.index, rb.values, color=COLORS[1], lw=LINE_WIDTH, label="필라델피아 반도체 SOX")
     ax.axhline(100, color="#999999", lw=0.8)
     unit_label(ax, f"({TODAY.year % 100}/01/01=100)")
+    log_price_axis(ax, pd.concat([ra, rb]).values)
     date_axis(ax, pd.Timestamp(YEAR_START), max(ra.index[-1], rb.index[-1]))
     legend(ax)
-    cap = caption("바이오테크 · 반도체 (연초=100)",
-                  [f"IBB {latest(ra, '.1f')}", f"SOX {latest(rb, '.1f')}"], [a.source, b.source])
-    return ChartResult(save(fig, "6_ibb_sox"), cap)
+    title = "바이오테크 · 반도체 (연초=100)"
+    cap = caption(title, [f"IBB {latest(ra, '.1f', pct=True)}", f"SOX {latest(rb, '.1f', pct=True)}"],
+                  [a.source, b.source])
+    return ChartResult(save(fig, "6_ibb_sox", title), cap)
 
 
 CHARTS = [

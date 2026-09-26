@@ -89,6 +89,88 @@ def setup_korean_font() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# 차트 공통: 그림 안 제목, 가격 차트 로그 눈금, 변화율
+# ---------------------------------------------------------------------------
+
+TITLE_WEIGHT = 600  # NanumGothicBold.ttf 는 weight 600 으로 등록된다
+
+
+def add_title(fig, text: str, x: float = 0.015, y: float = 0.975, fontsize: float | None = None) -> None:
+    """그림 왼쪽 위에 굵은 제목. 글자 크기는 그림 폭에 비례(텔레그램에서 같은 크기로 보이도록).
+
+    나눔고딕 Bold가 가늘어 보여 같은 색 윤곽선으로 굵기를 더한다.
+    """
+    from matplotlib import patheffects
+
+    fig.text(x, y, text, ha="left", va="top", fontsize=fontsize or 1.7 * fig.get_figwidth(),
+             fontweight=TITLE_WEIGHT, color="#111111",
+             path_effects=[patheffects.withStroke(linewidth=0.8, foreground="#111111")])
+
+
+def add_title_band(path: Path, text: str) -> None:
+    """스크린샷(PNG) 위에 흰 띠를 붙이고 왼쪽 위에 굵은 제목을 쓴다(matplotlib 차트 제목과 같은 비율)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    size = round(w * 0.0236)  # add_title: 그림 폭의 약 2.4%
+    band = round(size * 2.1)
+    bold = next((p for p in [NANUM_PATH.with_name("NanumGothicBold.ttf"), *Path("/usr/share/fonts").rglob(
+        "NanumGothicBold.ttf")] if p.exists()), None)
+    font = ImageFont.truetype(str(bold), size) if bold else ImageFont.load_default()
+    out = Image.new("RGB", (w, h + band), "white")
+    out.paste(im, (0, band))
+    ImageDraw.Draw(out).text((round(w * 0.015), band // 2), text, font=font, fill="#111111", anchor="lm",
+                             stroke_width=max(1, size // 28), stroke_fill="#111111")
+    out.save(path)
+
+
+def _nice_log_ticks(lo: float, hi: float) -> list[float]:
+    """lo~hi 안의 보기 좋은 눈금 4~8개. 범위가 넓으면 1·2·5×10^k 계열, 좁으면 등간격."""
+    import math
+
+    import numpy as np
+    from matplotlib.ticker import MaxNLocator
+
+    kmin, kmax = math.floor(math.log10(lo)) - 1, math.ceil(math.log10(hi)) + 1
+    for mantissas in ([1, 2, 5], [1, 2, 3, 5], [1, 1.5, 2, 3, 4, 5, 7]):
+        ticks = [m * 10 ** k for k in range(kmin, kmax + 1) for m in mantissas]
+        ticks = [t for t in ticks if lo <= t <= hi]
+        if 4 <= len(ticks) <= 8:
+            return ticks
+    for nbins in range(5, 11):
+        ticks = MaxNLocator(nbins=nbins, steps=[1, 2, 2.5, 5, 10]).tick_values(lo, hi)
+        ticks = [float(t) for t in np.round(ticks, 10) if lo <= t <= hi]
+        if len(ticks) >= 4:
+            break
+    return ticks
+
+
+def log_price_axis(ax, values) -> None:
+    """가격 차트용 로그 눈금. 눈금 글자는 지수 표기 없이 일반 숫자."""
+    import math
+
+    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+
+    vals = [float(v) for v in values if v == v and v > 0]
+    lo, hi = min(vals), max(vals)
+    pad = (math.log10(hi) - math.log10(lo)) * 0.05 or 0.02
+    lo, hi = 10 ** (math.log10(lo) - pad), 10 ** (math.log10(hi) + pad)
+    ax.set_yscale("log")
+    ax.set_ylim(lo, hi)
+    ticks = _nice_log_ticks(lo, hi)
+    decimals = max((len(f"{t:.10g}".split(".")[1]) if "." in f"{t:.10g}" else 0) for t in ticks)
+    decimals = min(decimals, 2)
+    ax.yaxis.set_major_locator(FixedLocator(ticks))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.{decimals}f}"))
+    ax.yaxis.set_minor_locator(NullLocator())
+
+
+def pct_change(v: float, prev: float) -> str:
+    return f"{(v / prev - 1) * 100:+.1f}%"
+
+
+# ---------------------------------------------------------------------------
 # 메시지와 항목 실행
 # ---------------------------------------------------------------------------
 

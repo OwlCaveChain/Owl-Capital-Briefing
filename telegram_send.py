@@ -157,7 +157,7 @@ def _dry_run_print(kind: str, body: str) -> None:
     problems = check_html(body)
     print(f"[telegram dry-run] {kind}")
     print("┌" + "─" * 40)
-    for line in visible(body).split("\n"):
+    for line in (visible(body) or "(캡션 없음)").split("\n"):
         print(f"│ {line}")
     print("└" + "─" * 40)
     if problems:
@@ -182,7 +182,8 @@ def send_photo(path: str | Path, caption: str = "", *, html: bool = False, dry_r
     if dry_run or not enabled():
         _dry_run_print(f"사진 {path.name}", body)
         return None
-    res = _call("sendPhoto", {"caption": body, "parse_mode": "HTML"}, files_path=path)
+    data = {"caption": body, "parse_mode": "HTML"} if body else {}  # 제목이 그림 안에 있으면 캡션 없음
+    res = _call("sendPhoto", data, files_path=path)
     mid = res.get("message_id")
     print(f"[telegram] ok message_id={mid} (사진 {path.name})")
     return mid

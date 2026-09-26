@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from briefing_common import OUT_DIR, UA, Message, Prepared, run_standalone
+from briefing_common import OUT_DIR, UA, Message, Prepared, add_title_band, run_standalone
 
 NAME = "핀비즈 히트맵"
 FAIL_TEXT = "핀비즈 히트맵 확인 실패"
@@ -95,7 +95,8 @@ def prepare() -> Prepared:
                 out = OUT_DIR / fname
                 try:
                     capture(page, url, out)
-                    messages.append(Message("photo", f"S&P 500 히트맵 ({label})", out, label))
+                    add_title_band(out, f"S&P 500 히트맵 ({label})")  # 제목은 그림 안에, 캡션 없음
+                    messages.append(Message("photo", "", out, label))
                 except Exception as e:  # noqa: BLE001
                     failed.append(label)
                     errors.append(f"{label} {type(e).__name__}: {e}"[:200])
