@@ -4,8 +4,8 @@
 받은 시계열은 data/ 폴더에 CSV로 쌓고(새 날짜만 추가), 변경분을 git에 커밋·푸시한다.
 
 환경변수
-  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰 (루틴 프롬프트의 [전송 설정] 값)
-  TELEGRAM_CHAT_ID     텔레그램 채팅 ID
+  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰 (전송은 telegram_send.py)
+  TELEGRAM_CHAT_ID     텔레그램 채팅 ID (없으면 telegram_send 기본값)
   CHARTS_DATA_BRANCH   data/ 커밋을 푸시할 브랜치 (기본: 원격 기본 브랜치)
 
 옵션
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import io
 import os
 import subprocess
@@ -52,6 +53,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
+
+import telegram_send  # noqa: E402
 
 KST = dt.timezone(dt.timedelta(hours=9))
 TODAY = dt.datetime.now(KST).date()
@@ -216,8 +219,15 @@ def fetch_mof_jgb10() -> pd.Series:
     return s
 
 
-def fetch_petronet_dubai(start: dt.date) -> pd.Series:
-    """한국석유공사 페트로넷 일일국제원유가격(엑셀 다운로드)에서 두바이 현물가."""
+PETRONET_COLS = {"Dubai": "Dubai", "Brent": "Brent", "WTI": "WTI"}
+
+
+@functools.lru_cache(maxsize=4)
+def _petronet_table(start: dt.date) -> pd.DataFrame:
+    """한국석유공사 페트로넷 일일국제원유가격(엑셀 다운로드).
+
+    열: Dubai(현물), Brent(ICE 선물 근월물), WTI(NYMEX 선물 근월물). 한 실행에서 한 번만 받는다.
+    """
     session = requests.Session()
     session.headers.update(UA)
     session.get("https://www.petronet.co.kr/v4/main.jsp", timeout=(10, HTTP_TIMEOUT))  # 세션 쿠키
@@ -232,7 +242,7 @@ def fetch_petronet_dubai(start: dt.date) -> pd.Series:
     r.raise_for_status()
     table = next(t for t in pd.read_html(io.StringIO(r.content.decode("utf-8", errors="replace")))
                  if t.shape[1] >= 3 and (t.iloc[0] == "Dubai").any())
-    col = list(table.iloc[0]).index("Dubai")
+    header = list(table.iloc[0])
     rows = table.iloc[1:]
     md_ = rows[0].astype(str).str.extract(r"(\d{1,2})월\s*(\d{1,2})일")
     ok = md_.notna().all(axis=1)
@@ -244,10 +254,22 @@ def fetch_petronet_dubai(start: dt.date) -> pd.Series:
             y += 1
         years.append(y)
         prev = m
-    idx = pd.to_datetime({"year": years, "month": months, "day": md_[ok][1].astype(int).tolist()})
-    s = pd.Series(pd.to_numeric(rows[ok][col], errors="coerce").values, index=pd.DatetimeIndex(idx)).dropna()
+    idx = pd.DatetimeIndex(pd.to_datetime({"year": years, "month": months, "day": md_[ok][1].astype(int).tolist()}))
+    out = pd.DataFrame(index=idx)
+    for name, col in PETRONET_COLS.items():
+        if col in header:
+            out[name] = pd.to_numeric(rows[ok][header.index(col)], errors="coerce").values
+    return out
+
+
+def fetch_petronet(product: str, start: dt.date) -> pd.Series:
+    """페트로넷 유종별 일일 가격. product: Dubai | Brent | WTI"""
+    table = _petronet_table(start)
+    if product not in table.columns:
+        raise ValueError(f"페트로넷 {product} 열 없음")
+    s = table[product].dropna()
     if s.empty:
-        raise ValueError("페트로넷 두바이 빈 데이터")
+        raise ValueError(f"페트로넷 {product} 빈 데이터")
     return s
 
 
@@ -480,20 +502,41 @@ def chart_10y() -> ChartResult:
     return ChartResult(save(fig, "2_10y"), cap)
 
 
+def brent_spot_premium(futures: pd.Series) -> str | None:
+    """브렌트 현물(FRED Dated Brent) − 브렌트 ICE 선물(페트로넷), 두 값이 모두 있는 최근 날짜 기준."""
+    try:
+        spot = fetch_chain("브렌트 현물", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU",
+                                          lambda: fetch_fred("DCOILBRENTEU"))]).series
+    except SourceError as e:
+        print(f"[경고] {e}", file=sys.stderr)
+        return None
+    both = pd.concat([spot.rename("spot"), futures.rename("fut")], axis=1, sort=True).dropna()
+    if both.empty:
+        return None
+    d = both.index[-1]
+    prem = both["spot"].iloc[-1] - both["fut"].iloc[-1]
+    return f"브렌트 현물 프리미엄 {prem:+.2f} ({md(d)} 기준, 현물 ${both['spot'].iloc[-1]:.2f})"
+
+
 def chart_oil() -> ChartResult:
+    """페트로넷 한 곳에서 두바이 현물·브렌트 ICE 선물·WTI NYMEX 선물을 받는다."""
     start = YEAR_START
     oils = [
-        ("WTI", [("fred_DCOILWTICO", "FRED DCOILWTICO", lambda: fetch_fred("DCOILWTICO")),
-                 ("yahoo_CL=F", "Yahoo CL=F(선물)", lambda: fetch_yahoo("CL=F", start))]),
-        ("브렌트", [("fred_DCOILBRENTEU", "FRED DCOILBRENTEU", lambda: fetch_fred("DCOILBRENTEU")),
-                    ("yahoo_BZ=F", "Yahoo BZ=F(선물)", lambda: fetch_yahoo("BZ=F", start))]),
-        ("두바이", [("petronet_Dubai", "페트로넷", lambda: fetch_petronet_dubai(start)),
-                    ("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
+        ("WTI", "WTI(NYMEX 선물)",
+         [("petronet_WTI", "페트로넷", lambda: fetch_petronet("WTI", start)),
+          ("yahoo_CL=F", "Yahoo CL=F", lambda: fetch_yahoo("CL=F", start))]),
+        ("브렌트", "브렌트(ICE 선물)",
+         [("petronet_Brent", "페트로넷", lambda: fetch_petronet("Brent", start)),
+          ("yahoo_BZ=F", "Yahoo BZ=F", lambda: fetch_yahoo("BZ=F", start))]),
+        ("두바이", "두바이(현물)",
+         [("petronet_Dubai", "페트로넷", lambda: fetch_petronet("Dubai", start)),
+          ("fred_POILDUBUSDM", "FRED/IMF 월평균", lambda: fetch_fred("POILDUBUSDM"))]),
     ]
     fig, ax = new_figure()
     parts, sources, missing = [], [], []
+    brent = None
     last = pd.Timestamp(start)
-    for i, (name, chain) in enumerate(oils):
+    for i, (name, label, chain) in enumerate(oils):
         try:
             f = fetch_chain(name, chain)
         except SourceError as e:
@@ -505,11 +548,14 @@ def chart_oil() -> ChartResult:
             missing.append(f"{name} 올해 데이터 없음")
             continue
         monthly = period_word(s) == "전월"
-        label = f"{name}(월평균)" if monthly else name
+        if monthly:
+            label = f"{name}(월평균)"
         ax.plot(plot_x(s), s.values, color=COLORS[i], lw=LINE_WIDTH, label=label,
                 marker="o" if monthly else None, markersize=4)
         parts.append(f"{label} {latest(s, '.2f', prefix='$')}")
-        sources.append(f"{name} {f.source}")
+        sources.append(f.source if f.source == "페트로넷" else f"{name} {f.source}")
+        if name == "브렌트":
+            brent = s
         last = max(last, s.index[-1])
     if not parts:
         plt.close(fig)
@@ -517,7 +563,12 @@ def chart_oil() -> ChartResult:
     unit_label(ax, "(달러/배럴)")
     date_axis(ax, pd.Timestamp(start), last)
     legend(ax)
-    cap = "유가 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(sources)
+    premium = brent_spot_premium(brent) if brent is not None else None
+    if premium:
+        sources.append("브렌트 현물 FRED")
+    cap = "유가 " + " / ".join(parts + missing) + " · 출처 " + ", ".join(dict.fromkeys(sources))
+    if premium:
+        cap += f"\n{premium}"
     return ChartResult(save(fig, "3_oil"), cap)
 
 
@@ -604,34 +655,16 @@ CHARTS = [
 
 
 class Telegram:
-    def __init__(self, token: str | None, chat_id: str | None, dry_run: bool):
-        self.dry_run = dry_run or not (token and chat_id)
-        self.base = f"https://api.telegram.org/bot{token}" if token else ""
-        self.chat_id = chat_id
+    """telegram_send 공용 모듈을 감싼다. 토큰이 없거나 --dry-run이면 전송하지 않는다."""
 
-    def _post(self, method: str, **kwargs) -> None:
-        def call():
-            r = requests.post(f"{self.base}/{method}", timeout=60, **kwargs)
-            if not r.ok:
-                raise RuntimeError(f"{method} HTTP {r.status_code}: {r.text[:200]}")
+    def __init__(self, dry_run: bool):
+        self.dry_run = dry_run or not telegram_send.enabled()
 
-        with_retry(call)
+    def photo(self, path: Path, caption: str) -> int | None:
+        return telegram_send.send_photo(path, caption, dry_run=self.dry_run)
 
-    def photo(self, path: Path, caption: str) -> None:
-        if self.dry_run:
-            print(f"[dry-run] 사진 {path.name} | {caption}")
-            return
-        with open(path, "rb") as fh:
-            data = fh.read()
-        self._post("sendPhoto", data={"chat_id": self.chat_id, "caption": caption[:1024]},
-                   files={"photo": (path.name, data, "image/png")})
-
-    def text(self, text: str) -> None:
-        if self.dry_run:
-            print(f"[dry-run] 텍스트 | {text}")
-            return
-        self._post("sendMessage", data={"chat_id": self.chat_id, "text": text[:4096],
-                                        "disable_web_page_preview": "true"})
+    def text(self, text: str) -> int | None:
+        return telegram_send.send_text(text[:1000], dry_run=self.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -684,11 +717,9 @@ def main() -> int:
     args = ap.parse_args()
 
     setup_korean_font()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not args.dry_run and not (token and chat_id):
-        print("[경고] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 가 없어 전송 없이 out/ 에만 저장합니다.", file=sys.stderr)
-    tg = Telegram(token, chat_id, args.dry_run)
+    if not args.dry_run and not telegram_send.enabled():
+        print("[경고] TELEGRAM_BOT_TOKEN 이 없어 전송 없이 out/ 에만 저장합니다.", file=sys.stderr)
+    tg = Telegram(args.dry_run)
 
     only = {int(x) for x in args.only.split(",") if x.strip()}
     failures = 0
@@ -697,15 +728,16 @@ def main() -> int:
             continue
         try:
             res = fn()
-            tg.photo(res.path, res.caption)
-            print(f"[OK] {no}. {name}: {res.caption}")
+            mid = tg.photo(res.path, res.caption)
+            sent = "" if mid is None else f" (message_id={mid})"
+            print(f"[OK] {no}. {name}{sent}: {res.caption}")
         except Exception as e:  # noqa: BLE001
             failures += 1
             reason = _short(e) if not isinstance(e, SourceError) else str(e)
             print(f"[실패] {no}. {name}: {reason}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             try:
-                tg.text(f"{name} 차트 생성 실패: {reason}"[:1000])
+                tg.text(f"{name} 차트 생성 실패: {reason}")
             except Exception as e2:  # noqa: BLE001
                 print(f"[실패] 실패 알림 전송도 실패: {_short(e2)}", file=sys.stderr)
 
