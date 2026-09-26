@@ -14,7 +14,7 @@ python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡�
 | 3 | `finviz_heatmap.py` | 핀비즈 S&P 500 히트맵 1일·4주·연초 대비(캡션 없음) | "핀비즈 히트맵 확인 실패" |
 | 4 | `natgas.py` | 헨리허브 천연가스 선물(NG=F) 2020-12~, 로그 눈금, 캡션 "$3.251/MMBtu (-1.4%)" | "미 천연가스 차트 확인 실패" |
 | 5 | `charts.py` | 차트 6장 (아래) | "○○ 차트 생성 실패: 사유" |
-| 6 | `memory.py` | 메모리 텍스트: DRAM ETF 종가·좌수, SK하이닉스 2배(7709) 종가(HKD)·좌수, DRAM 현물가 정품 3개 품목(세션 평균·변화율) (아래) | 부분 실패는 그 줄만 "○○ 확인 실패", 전부 실패면 "메모리 항목 확인 실패" |
+| 6 | `memory.py` | 메모리: DRAM ETF 종가·좌수, SK하이닉스 2배(7709)·삼성전자 2배(7747) 종가(HKD)·좌수, DRAM 현물가 정품 3개 품목(세션 평균·변화율). 좌수가 20거래일 이상 쌓인 항목은 차트 (아래) | 부분 실패는 그 줄만 "○○ 확인 실패", 전부 실패면 "메모리 항목 확인 실패" |
 
 - 각 스크립트는 단독 실행도 된다(`python natgas.py --dry-run`).
 - 마지막에 메시지별 전송 결과(message_id 또는 실패 사유)와 실패 항목을 출력한다. 실패 항목이 있으면 종료 코드 1.
@@ -63,16 +63,19 @@ TELEGRAM_BOT_TOKEN=... python charts.py
 
 받은 시계열은 `data/<출처>_<코드>.csv`(date,value)로 저장하고, 실행 때마다 기존 마지막 날짜 이후 값만 추가한다.
 매일 한 줄씩 쌓는 지표는 `append_rows("키", pd.Series([값], index=[pd.Timestamp(날짜)]))`로 추가하면 된다.
-실행이 끝나면 data/ 변경분을 커밋하고 원격 기본 브랜치(또는 `CHARTS_DATA_BRANCH`)로 푸시한다. 실패하면 현재 브랜치로 푸시한다.
+실행이 끝나면 data/ 변경분을 커밋하고 원격 기본 브랜치(`main`, origin/HEAD 기준)로 푸시한다. 실패하면 현재 브랜치로 푸시한다.
 
 ## 메모리 (`memory.py`, 메시지 6)
 
 ```
 DRAM ETF $61.91 (+2.0%)
-· 좌수 4억 3,433만주 (+1,250만)
+· 좌수 4억 3,433만좌 (+1,250만좌)
 
 SK하이닉스 2배(7709) HK$42.52 (-3.0%, 9/24)
-· 좌수 8억 4,200만주 (9/23)
+· 좌수 8억 4,200만좌 (9/23)
+
+삼성전자 2배(7747) HK$16.77 (-0.7%)
+· 좌수 1억 2,150만좌 (+150만좌)
 
 DRAM 현물가(세션 평균) 9/24
 DDR5 16Gb $57.667 (+0.29%)
@@ -83,12 +86,17 @@ DDR4 8Gb $46.107 (+0.47%)
 | 항목 | 1순위 출처 | 대체 출처 | data/ |
 |------|-----------|-----------|-------|
 | DRAM ETF | Roundhill 일별 CSV(`RU_DailyNAV.csv`): 종가(Market Price)·NAV·좌수·순자산, `RU_DRAM_Daily.csv`로 가격·NAV 과거분 | Yahoo DRAM(가격만) | `roundhill_DRAM_price/nav/shares/aum` |
-| 7709 가격 | Yahoo 7709.HK 종가(HKD) | CSOP 웹 API closePrice | `yahoo_7709_HK`, `csop_7709_close` |
-| 7709 NAV·좌수·순자산 | CSOP 웹 API(`website-api.csopasset.com/cmsApi/NAV/product`). NAV는 저장만 | 없음 | `csop_7709_nav/units/aum` |
+| 7709·7747 가격 | Yahoo 7709.HK·7747.HK 종가(HKD) | CSOP 웹 API closePrice | `yahoo_7709_HK`·`yahoo_7747_HK`, `csop_7709_close`·`csop_7747_close` |
+| 7709·7747 NAV·좌수·순자산 | CSOP 웹 API(`website-api.csopasset.com/cmsApi/NAV/product`, productName은 `memory.CSOP_PRODUCTS`). NAV·순자산은 저장만 | 없음 | `csop_7709_nav/units/aum`, `csop_7747_nav/units/aum` |
 | DRAM 현물가 | DRAMeXchange 첫 화면 DRAM Spot 표(정품: DDR5 16Gb 4800/5600, DDR4 16Gb 3200, DDR4 8Gb 3200. eTT·DDR3 제외) | TrendForce 현물가 페이지 | `dramx_DDR5_16Gb_4800_5600` 등 |
 
+- ETF 발행 단위는 "좌"로 쓴다(좌수 4억 3,433만좌, 변화도 +1,250만좌).
 - 좌수 변화는 data/에 저장된 직전 날짜 값과 비교한다(첫 기록이면 값만). 좌수·순자산·NAV는 `float_format="%.15g"`로 반올림 없이 저장한다.
 - 날짜는 다른 메시지처럼 직전 영업일보다 오래된 값에만 붙는다(현물가는 사이트의 Last Update 날짜).
+- 차트 전환: 좌수가 20거래일(`CHART_MIN_DAYS`) 이상 쌓인 항목은 그 항목만 텍스트 대신 차트로 보낸다. 20일 전까지는 텍스트.
+  - DRAM ETF·7709·7747: 좌축 좌수(빨간 선), 우축 가격(회색 선, 로그 눈금), 좌수 첫 기록일부터. 제목은 그림 안("SK하이닉스 2배(7709) 좌수 · 가격"), 캡션은 숫자만(`가격 HK$42.52 (-3.0%)` / `좌수 8억 4,200만좌 (+4,200만좌)`)
+  - DRAM 현물가: 3개 품목 모두 20일 이상이면 로그 눈금 한 차트, 캡션은 품목별 한 줄
+  - 텍스트로 남은 항목은 이어진 것끼리 한 통으로, 차트는 항목 순서(DRAM ETF → 7709 → 7747 → 현물가)대로 보낸다. 차트를 못 그리면 그 항목은 텍스트로
 - 단독 실행 `python memory.py --dry-run`. `--dry-run`이 아니면 끝나고 data/를 커밋·푸시한다.
 
 ## data/ 보존: 모든 브랜치에서 합치기 (`data_merge.py`, `cleanup_data.py`)
@@ -106,4 +114,5 @@ python cleanup_data.py --no-delete  # 합치기·커밋·푸시까지만
 ```
 
 지우는 브랜치는 claude/*이면서, 기본 브랜치와 갈라진 뒤 바뀐 파일이 data/뿐이고, 그 data/ 행이 합친 기본 브랜치에 모두 있는 것만이다.
+`main`·`master`는 어떤 경우에도 지우지 않는다. 예전 기본 브랜치 `claude/bold-lamport-70e83u`는 모든 커밋이 원격 main 이력에 있고 data/ 행도 (합치기 전) 원격 main에 모두 있을 때만 지운다.
 지금 체크아웃한 브랜치, 코드·문서 변경이 있는 브랜치, 공통 이력이 없는 브랜치는 이유와 함께 남긴다. 기본 브랜치 푸시가 실패하면 아무것도 지우지 않는다.

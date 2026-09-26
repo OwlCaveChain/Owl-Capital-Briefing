@@ -6,7 +6,6 @@
 환경변수
   TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰 (전송은 telegram_send.py)
   TELEGRAM_CHAT_ID     텔레그램 채팅 ID (없으면 telegram_send 기본값)
-  CHARTS_DATA_BRANCH   data/ 커밋을 푸시할 브랜치 (기본: 원격 기본 브랜치)
 
 옵션
   --dry-run    텔레그램 전송 없이 out/ 폴더에 PNG와 캡션만 저장
@@ -733,10 +732,10 @@ def commit_data() -> None:
     if c.returncode != 0:
         print(f"[git] 커밋 실패: {c.stderr.strip()}", file=sys.stderr)
         return
-    target = os.environ.get("CHARTS_DATA_BRANCH")
-    if not target:
-        head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip()
-        target = head.split("/", 1)[1] if "/" in head else ""
+    # data/ 는 원격 기본 브랜치(main)에 쌓는다. 푸시가 막히면 현재 브랜치로.
+    import data_merge
+
+    target = data_merge.default_branch()
     current = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     for branch in [b for b in dict.fromkeys([target, current]) if b and b != "HEAD"]:
         p = git("push", "origin", f"HEAD:refs/heads/{branch}")

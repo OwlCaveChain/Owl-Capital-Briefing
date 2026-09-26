@@ -8,9 +8,11 @@
 작업 폴더는 건드리지 않는다. 기본 브랜치를 임시 worktree 로 꺼내 그 안에서 합치고 커밋한다.
 
 지우는 브랜치(모두 만족할 때만)
-- 이름이 claude/ 로 시작하고, 지금 체크아웃한 브랜치가 아니다
+- 이름이 claude/ 로 시작하고, 지금 체크아웃한 브랜치가 아니다(main·master 는 어떤 경우에도 지우지 않는다)
 - 기본 브랜치와 갈라진 뒤 바뀐 파일이 data/ 뿐이다(코드·문서 변경이 있으면 남긴다)
 - 그 브랜치의 data/ 행이 합친 기본 브랜치에 모두 들어 있다
+- 예전 기본 브랜치(FORMER_DEFAULTS)는 더 엄격하게: 그 브랜치의 모든 커밋이 원격 main 이력에 들어 있고
+  data/ 행도 (합치기 전) 원격 main 에 모두 있을 때만
 기본 브랜치 푸시가 실패하면 아무것도 지우지 않는다. 삭제는 y 를 입력해야만 한다.
 """
 
@@ -26,6 +28,8 @@ from data_merge import (ROOT, default_branch, fetch_all, git, merge_into, missin
                         remote_branches)
 
 PREFIX = "claude/"
+PROTECTED = {"main", "master"}  # 절대 지우지 않는다
+FORMER_DEFAULTS = {"claude/bold-lamport-70e83u"}  # main 전에 기본 브랜치로 쓰던 브랜치
 
 
 def git_ok(*args: str, cwd: Path = ROOT, timeout: int = 120) -> str:
@@ -45,12 +49,27 @@ def ask(prompt: str) -> bool:
         return False
 
 
-def classify(branches: list[str], base: str, work: Path, current: str) -> tuple[list[str], list[tuple[str, str]]]:
-    """(지울 브랜치, [(남길 브랜치, 이유)])."""
+def former_default_gap(ref: str, base: str, pristine: Path) -> str:
+    """예전 기본 브랜치가 원격 main 에 다 들어갔는지. 들어갔으면 '', 아니면 이유."""
+    if git("merge-base", "--is-ancestor", ref, f"origin/{base}").returncode != 0:
+        ahead = git_ok("rev-list", "--count", f"origin/{base}..{ref}").strip()
+        return f"{base}에 없는 커밋 {ahead}개"
+    miss = missing_rows(ref, pristine)
+    if miss:
+        return f"{base}에 아직 없는 data 행: " + ", ".join(f"{Path(k).name} {v}행" for k, v in miss.items())
+    return ""
+
+
+def classify(branches: list[str], base: str, work: Path, current: str,
+             pristine: Path | None = None) -> tuple[list[str], list[tuple[str, str]]]:
+    """(지울 브랜치, [(남길 브랜치, 이유)]). pristine 은 합치기 전 원격 기본 브랜치 작업 폴더."""
+    pristine = pristine or work
     delete, keep = [], []
     for b in branches:
         ref = f"origin/{b}"
-        if b == base:
+        if b == base or b in PROTECTED:
+            if b != base:
+                keep.append((b, "보호 브랜치"))
             continue
         if not b.startswith(PREFIX):
             keep.append((b, f"{PREFIX} 브랜치가 아님"))
@@ -71,6 +90,11 @@ def classify(branches: list[str], base: str, work: Path, current: str) -> tuple[
         if miss:
             keep.append((b, "합치지 못한 data 행: " + ", ".join(f"{Path(k).name} {v}행" for k, v in miss.items())))
             continue
+        if b in FORMER_DEFAULTS:
+            why = former_default_gap(ref, base, pristine)
+            if why:
+                keep.append((b, f"예전 기본 브랜치, {why}"))
+                continue
         delete.append(b)
     return delete, keep
 
@@ -90,10 +114,13 @@ def main() -> int:
     refs = ordered_refs()
     print(f"[정리] 기본 브랜치: {base}, 원격 브랜치 {len(refs)}개")
 
+    if base in PROTECTED and base != "main":
+        print(f"[경고] 기본 브랜치가 {base}입니다(main 이 아님).", file=sys.stderr)
     tmp = Path(tempfile.mkdtemp(prefix="owl-data-"))
-    work = tmp / "wt"
+    work, pristine = tmp / "wt", tmp / "base"
     try:
         git_ok("worktree", "add", "--detach", str(work), f"origin/{base}")
+        git_ok("worktree", "add", "--detach", str(pristine), f"origin/{base}")
         changed = merge_into(work, refs)
         if changed:
             print("[정리] 합친 결과(새로 들어온 행):")
@@ -114,8 +141,10 @@ def main() -> int:
                 return 1
             print(f"[정리] {base}에 커밋·푸시 완료: {git_ok('rev-parse', '--short', 'HEAD', cwd=work).strip()}")
             fetch_all()
+            git_ok("checkout", "--detach", f"origin/{base}", cwd=pristine)
 
-        delete, keep = classify(remote_branches(), base, work, current)
+        delete, keep = classify(remote_branches(), base, work, current, pristine)
+        delete = [b for b in delete if b not in PROTECTED and b != base]  # 마지막 안전장치
         print(f"\n[정리] 남길 브랜치 {len(keep)}개")
         for b, why in keep:
             print(f"  {b}  ({why})")
@@ -142,6 +171,7 @@ def main() -> int:
         return 1 if failed else 0
     finally:
         git("worktree", "remove", "--force", str(work))
+        git("worktree", "remove", "--force", str(pristine))
         shutil.rmtree(tmp, ignore_errors=True)
 
 

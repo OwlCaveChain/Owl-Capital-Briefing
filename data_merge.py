@@ -31,15 +31,19 @@ def fetch_all(cwd: Path = ROOT) -> str | None:
                 cwd=cwd, timeout=FETCH_TIMEOUT)
     except subprocess.TimeoutExpired:
         return f"git fetch {FETCH_TIMEOUT}초 시간 초과"
-    return None if p.returncode == 0 else (p.stderr.strip().splitlines() or ["git fetch 실패"])[-1]
+    if p.returncode != 0:
+        return (p.stderr.strip().splitlines() or ["git fetch 실패"])[-1]
+    git("remote", "set-head", "origin", "-a", cwd=cwd, timeout=FETCH_TIMEOUT)  # 기본 브랜치 변경 반영(실패해도 무시)
+    return None
+
+
+DEFAULT_BRANCH = "main"
 
 
 def default_branch(cwd: Path = ROOT) -> str:
+    """원격 기본 브랜치. origin/HEAD 를 따르되, 알 수 없으면 main."""
     head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd).stdout.strip()
-    if "/" in head:
-        return head.split("/", 1)[1]
-    names = remote_branches(cwd)
-    return "main" if "main" in names else ("master" if "master" in names else (names[0] if names else "main"))
+    return head.split("/", 1)[1] if "/" in head else DEFAULT_BRANCH
 
 
 def remote_branches(cwd: Path = ROOT) -> list[str]:
