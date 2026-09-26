@@ -481,7 +481,7 @@ def chart_gasoline() -> ChartResult:
     unit_label(ax, "(달러/갤런)")
     date_axis(ax, s.index[0], s.index[-1])
     legend(ax)
-    cap = f"미 가솔린 소매가격 {latest(s, '.2f', prefix='$')}/갤런 · 출처 {f.source}"
+    cap = f"미 가솔린 소매가격 {latest(s, '.2f', '/갤런', prefix='$', chg_unit='')} · 출처 {f.source}"
     return ChartResult(save(fig, "4_gasoline"), cap)
 
 
