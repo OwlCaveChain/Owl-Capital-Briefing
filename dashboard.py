@@ -22,7 +22,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from briefing_common import OUT_DIR, ROOT, Message, Prepared, now_kst, run_standalone
+from briefing_common import OUT_DIR, PRETENDARD, ROOT, Message, Prepared, now_kst, pretendard_ok, run_standalone
 
 NAME = "아침 대시보드"
 FAIL_TEXT = "아침 대시보드 확인 실패"
@@ -379,7 +379,7 @@ def collect() -> Collected:
 # ---------------------------------------------------------------------------
 # 그림(Pillow): 가로 1440px, 세로 최대 1800px(4:5). 글씨는 1080px 기준 크기의 4/3 배
 #   (제목 70, 구역 제목 54, 핵심 숫자·티커 54, 본문 48 = 1080px 기준 52·40·40·36)
-# 서체는 Pretendard(숫자는 tabular figures). 없으면 setup_fonts.sh 로 설치하고, 그래도 없으면 나눔고딕
+# 서체는 저장소 fonts/ 의 Pretendard(숫자는 tabular figures). 없으면 나눔고딕
 # ---------------------------------------------------------------------------
 
 WIDTH = 1440
@@ -394,30 +394,11 @@ ROW_H = 80  # 표 한 줄 높이(54px 숫자 기준)
 COL_GAP = 52
 FULL_GAP = 34  # 섹터 전체표 열 간격(평일 6개 열이 1440px에 들어가도록)
 
-PRETENDARD_DIRS = [Path("/usr/share/fonts/opentype/pretendard"), Path.home() / ".local/share/fonts/pretendard"]
-WEIGHT_FILES = {"r": "Regular", "m": "Medium", "sb": "SemiBold", "b": "Bold"}
-NANUM = {"r": "NanumGothic.ttf", "m": "NanumGothic.ttf", "sb": "NanumGothicBold.ttf", "b": "NanumGothicBold.ttf"}
+# 굵기 r|m|b → fonts/ 의 Pretendard 파일, 없으면 나눔고딕(briefing_common.pretendard_ok 가 [경고])
+WEIGHT_FILES = {"r": "Regular", "m": "Medium", "b": "Bold"}
+NANUM = {"r": "NanumGothic.ttf", "m": "NanumGothic.ttf", "b": "NanumGothicBold.ttf"}
 
 _fonts: dict = {}
-_font_dir: list = []  # [Path] 또는 [None](Pretendard 없음), 한 번만 찾는다
-
-
-def pretendard_dir() -> Path | None:
-    if not _font_dir:
-        def find():
-            return next((d for d in PRETENDARD_DIRS if (d / "Pretendard-Bold.otf").exists()), None)
-
-        d = find()
-        if d is None:
-            import subprocess
-
-            subprocess.run(["bash", str(ROOT / "setup_fonts.sh")], check=False, timeout=180)
-            d = find()
-            if d is None:
-                print("[경고] Pretendard 설치 실패, 나눔고딕으로 그립니다(숫자 폭이 고르지 않을 수 있음)",
-                      file=sys.stderr)
-        _font_dir.append(d)
-    return _font_dir[0]
 
 
 def font(weight: str, size: int):
@@ -425,8 +406,7 @@ def font(weight: str, size: int):
 
     key = (weight, size)
     if key not in _fonts:
-        d = pretendard_dir()
-        path = d / f"Pretendard-{WEIGHT_FILES[weight]}.otf" if d else \
+        path = PRETENDARD[WEIGHT_FILES[weight]] if pretendard_ok() else \
             Path("/usr/share/fonts/truetype/nanum") / NANUM[weight]
         _fonts[key] = ImageFont.truetype(str(path), size)
     return _fonts[key]
@@ -455,7 +435,7 @@ def sign_color(v: float | None, dec: int) -> str:
     return UP if v > 0 else DOWN
 
 
-# 글자 조각: (문자열, 굵기 r|m|sb|b, 크기, 색)
+# 글자 조각: (문자열, 굵기 r|m|b, 크기, 색)
 Run = tuple
 
 
@@ -524,8 +504,8 @@ class Canvas:
 
     def table(self, header: list[str], aligns: list[str], rows: list[list[list[Run]]],
               bands: list[str | None] | None = None, stripe: bool = True, gap_after: set[int] = frozenset(),
-              col_gap: int = COL_GAP) -> None:
-        """열 너비는 내용에 맞추고, 남는 폭은 둘째 열(이름) 뒤 간격으로 돌린다. 숫자 열은 오른쪽 정렬.
+              col_gap: int = COL_GAP, spare_after: int = 1) -> None:
+        """열 너비는 내용에 맞추고, 남는 폭은 이름 열(spare_after) 뒤 간격으로 돌린다. 숫자 열은 오른쪽 정렬.
 
         gap_after 의 줄 앞에는 굵은 구분선을 긋는다(대시보드 섹터 상위 5 / 하위 3).
         """
@@ -536,7 +516,7 @@ class Canvas:
         spare = inner - sum(widths) - col_gap * (len(widths) - 1)
         gaps = [col_gap] * (len(widths) - 1)
         if gaps and spare > 0:
-            gaps[min(1, len(gaps) - 1)] += spare  # 이름 열 뒤를 넓혀 숫자 열을 오른쪽에 모은다
+            gaps[min(spare_after, len(gaps) - 1)] += spare  # 이름 열 뒤를 넓혀 숫자 열을 오른쪽에 모은다
         xs, x = [], PAD + band_w
         for i, w in enumerate(widths):
             xs.append(x)
@@ -594,7 +574,7 @@ def cell_value(v: float | None, dec: int, suffix: str = "", secondary: bool = Fa
         return num(DASH, FLAT, SIZE_BODY if secondary else SIZE_NUM)
     if secondary:
         return num(f"{v:,.{dec}f}{suffix}", SUB, SIZE_BODY, "m")
-    return num(f"{v:,.{dec}f}{suffix}", INK, SIZE_NUM, "sb")
+    return num(f"{v:,.{dec}f}{suffix}", INK, SIZE_NUM, "b")
 
 
 def cell_trend(arrow: str | None) -> list[Run]:
@@ -614,7 +594,7 @@ def cell_rank_change(v: int | None) -> list[Run]:
 def cell_above(v: bool | None) -> list[Run]:
     if v is None:
         return num(DASH, FLAT)
-    return txt("위", SIZE_BODY, UP, "sb") if v else txt("아래", SIZE_BODY, DOWN, "sb")
+    return txt("위", SIZE_BODY, UP, "b") if v else txt("아래", SIZE_BODY, DOWN, "b")
 
 
 def cell_etf(r: SectorRow) -> list[Run]:
@@ -657,7 +637,7 @@ def draw_liquidity(cv: Canvas, rows: list[Row], warnings: list[str]) -> None:
         change = cell_rate_change(r.change) if r.kind == "rate" else cell_pct(r.change)
         body.append([txt(r.name, SIZE_BODY, INK, "m"), cell_value(r.value, 2, suffix), change,
                      cell_trend(r.trend)])
-    cv.table(["", "현재", "전일 대비", "1개월"], ["left", "right", "right", "right"], body)
+    cv.table(["", "현재", "전일 대비", "1개월"], ["left", "right", "right", "right"], body, spare_after=0)
     for w in warnings:
         cv.y += 8
         cv.line(txt("⚠ " + w, SIZE_BODY, WARN, "b"))

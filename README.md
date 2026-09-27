@@ -42,12 +42,20 @@ python briefing.py --dry-run --layout monday   # 섹터 전체표를 월요일�
   티커·등락률·핵심 숫자 54px 굵게, 본문 48px, 한글명·순위·Overnight 현재값은 48px 회색(보조). 바깥 여백은 좌우 24px.
   넘치면 글씨를 줄이지 않고 두 장으로 나눈다: 대시보드는 Overnight + Liquidity / Sectors, 전체표는 1–11위 / 12–22위.
   앨범은 격자로 줄어 보이므로 한 장씩 낱장(sendPhoto)으로 보낸다. 대시보드 섹터 구역의 상위 5와 하위 3 사이에는 굵은 선.
-- Pretendard 는 `bash setup_fonts.sh`로 설치한다(GitHub 릴리스, 실패하면 npm). 환경 설정 스크립트에 넣어 두고,
-  그림을 그릴 때 없으면 한 번 자동으로 실행한다. 그래도 없으면 나눔고딕으로 그리고 `[경고]`를 남긴다.
+- 서체는 아래 "글꼴" 참고.
 - 상승 빨강·하락 파랑 + +/− 부호, 등락률 소수 1자리, 금리 2자리. 실패한 지표는 "–", 로그에 `[출처]`·`[경고]`.
 - 순위는 `data/sector_rank.csv`(date, 티커별 순위)에 시장 날짜로 매일 쌓는다. 비어 있는 최근 10거래일은 가격으로 거슬러 채운다.
   순위 변화는 7일 이상 전의 마지막 기록과 비교.
 - 단독 실행 `python dashboard.py --dry-run [--monday|--weekday]`. `--dry-run` 없이 실행하면 대시보드·전체표만 텔레그램으로 보낸다.
+
+## 글꼴 (`fonts/`)
+
+Pretendard 1.3.9 Regular·Medium·Bold(`fonts/Pretendard-*.otf`)와 라이선스(`fonts/OFL.txt`, SIL Open Font License 1.1)를 저장소에 둔다.
+시스템에 설치하지 않고 코드가 파일을 직접 불러온다: matplotlib 차트는 `briefing_common.setup_korean_font()`가
+`font_manager.addfont`로 등록하고, 대시보드·섹터 전체표(Pillow)는 `ImageFont.truetype`으로 같은 파일을 연다.
+파일이 없거나 등록에 실패하면 나눔고딕으로 대체하고 로그에 `[경고]`를 한 번 남긴다.
+
+환경 설정 스크립트는 저장소를 받기 전에 실행되므로 저장소 파일(스크립트·글꼴)을 부르는 줄을 넣지 않는다.
 
 ## 텔레그램 전송 (`telegram_send.py`)
 

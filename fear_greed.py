@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import briefing_common
 from briefing_common import OUT_DIR, UA, Message, Prepared, add_title, run_standalone, setup_korean_font
 
 NAME = "Fear & Greed"
@@ -32,14 +33,11 @@ STYLE = {  # 구간 계열별 (채우기, 테두리)
     "greed": ("#CDEFDF", "#23A566"),
 }
 LINE_BLUE = "#1F5FD1"
-BOLD = 600  # NanumGothicBold.ttf 는 weight 600 으로 등록된다
 
 
 def heavy(color: str, width: float = 0.9):
-    """나눔고딕 Bold가 가늘어 보여 같은 색 윤곽선으로 굵기를 더한다."""
-    from matplotlib import patheffects
-
-    return [patheffects.withStroke(linewidth=width, foreground=color)]
+    """나눔고딕 Bold가 가늘어 보여 같은 색 윤곽선으로 굵기를 더한다(Pretendard 면 없음)."""
+    return briefing_common.heavy_stroke(color, width)
 
 
 def cnn_int(x: float) -> int:
@@ -128,7 +126,7 @@ def draw_gauge(v: dict[str, int]):
         x, y = polar((r_out + r_in) / 2, mid)
         ax.text(x, y, name.upper(), ha="center", va="center", rotation=ang(mid) - 90,
                 rotation_mode="anchor", fontsize=10.5 if name != "Neutral" else 9.5,
-                fontweight=BOLD, color=(label_color := "#333333" if name == z else "#7A7A7A"),
+                fontweight=briefing_common.TITLE_WEIGHT, color=(label_color := "#333333" if name == z else "#7A7A7A"),
                 path_effects=heavy(label_color, 0.4))
 
     # 안쪽 눈금: 점과 숫자
@@ -146,7 +144,7 @@ def draw_gauge(v: dict[str, int]):
     nx, ny = -math.sin(t) * 0.035, math.cos(t) * 0.035
     ax.add_patch(Polygon([tip, (nx, ny), (-nx, -ny)], closed=True, color="black", zorder=5))
     ax.add_patch(Circle((0, 0), 0.165, facecolor="white", edgecolor="black", lw=2.5, zorder=6))
-    ax.text(0, -0.005, str(s), ha="center", va="center", fontsize=34, fontweight=BOLD, zorder=7,
+    ax.text(0, -0.005, str(s), ha="center", va="center", fontsize=34, fontweight=briefing_common.TITLE_WEIGHT, zorder=7,
             path_effects=heavy("black", 0.9))
 
     # 2x2 표(한 칸 한 줄): 라벨 · 구간 이름 ····· (값)
@@ -159,11 +157,11 @@ def draw_gauge(v: dict[str, int]):
         name = zone(val)
         fill, edge = STYLE[family(name)]
         ax.text(x0, y0, label, ha="left", va="center", fontsize=12, color="#777777")
-        name_t = ax.text(x0 + name_dx, y0, name, ha="left", va="center", fontsize=15, fontweight=BOLD,
+        name_t = ax.text(x0 + name_dx, y0, name, ha="left", va="center", fontsize=15, fontweight=briefing_common.TITLE_WEIGHT,
                          color="#222222", path_effects=heavy("#222222", 0.45))
         bx = x0 + width - badge_r
         ax.add_patch(Circle((bx, y0), badge_r, facecolor=fill, edgecolor=edge, lw=2))
-        ax.text(bx, y0 - 0.005, str(val), ha="center", va="center", fontsize=13, fontweight=BOLD,
+        ax.text(bx, y0 - 0.005, str(val), ha="center", va="center", fontsize=13, fontweight=briefing_common.TITLE_WEIGHT,
                 color="#222222", path_effects=heavy("#222222", 0.35))
         text_end = inv.transform(name_t.get_window_extent(renderer))[1][0]
         if bx - badge_r - text_end > 0.12:

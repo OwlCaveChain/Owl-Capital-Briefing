@@ -53,21 +53,56 @@ def date_suffix(d, monthly: bool = False) -> str:
 # 한글 폰트
 # ---------------------------------------------------------------------------
 
+# 1순위 Pretendard: 저장소 fonts/ 의 파일을 직접 등록한다(시스템 설치·설정 스크립트 없이).
+# 없으면 나눔고딕으로 대체하고 [경고]를 남긴다.
+FONT_DIR = ROOT / "fonts"
+PRETENDARD = {w: FONT_DIR / f"Pretendard-{w}.otf" for w in ("Regular", "Medium", "Bold")}
 KOREAN_FONTS = ["NanumGothic", "NanumBarunGothic", "Noto Sans CJK KR", "Noto Sans KR", "UnDotum"]
 NANUM_PATH = Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
 
+# 굵은 글씨 weight: Pretendard-Bold 는 700, 나눔고딕 Bold 는 600 으로 등록된다(setup_korean_font 가 정한다)
+TITLE_WEIGHT = 600
+_warned: set[str] = set()
+
+
+def warn_once(msg: str) -> None:
+    if msg not in _warned:
+        _warned.add(msg)
+        print(f"[경고] {msg}", file=sys.stderr)
+
+
+def pretendard_ok() -> bool:
+    """fonts/ 에 Pretendard 세 굵기가 모두 있으면 True, 아니면 [경고] 한 번."""
+    missing = [p.name for p in PRETENDARD.values() if not p.exists()]
+    if missing:
+        warn_once(f"Pretendard 글꼴 파일이 없어 나눔고딕으로 대체합니다(fonts/{', '.join(missing)})")
+    return not missing
+
 
 def setup_korean_font() -> str | None:
+    global TITLE_WEIGHT
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib import font_manager
 
+    plt.rcParams["axes.unicode_minus"] = False
+    if pretendard_ok():
+        try:
+            for path in PRETENDARD.values():
+                font_manager.fontManager.addfont(str(path))
+            plt.rcParams["font.family"] = "Pretendard"
+            TITLE_WEIGHT = 700
+            return "Pretendard"
+        except Exception as e:  # noqa: BLE001
+            warn_once(f"Pretendard 등록 실패({type(e).__name__}: {e}), 나눔고딕으로 대체합니다")
+
     def find() -> str | None:
         names = {f.name for f in font_manager.fontManager.ttflist}
         return next((n for n in KOREAN_FONTS if n in names), None)
 
+    TITLE_WEIGHT = 600
     # 굵은 글씨(NanumGothicBold 등)도 쓰도록 같은 폴더의 나눔 글꼴을 모두 등록
     for path in sorted(NANUM_PATH.parent.glob("NanumGothic*.ttf")) if NANUM_PATH.parent.exists() else []:
         font_manager.fontManager.addfont(str(path))
@@ -84,27 +119,25 @@ def setup_korean_font() -> str | None:
         plt.rcParams["font.family"] = name
     else:
         print("[경고] 한글 폰트를 찾지 못했습니다. 글자가 깨질 수 있습니다.", file=sys.stderr)
-    plt.rcParams["axes.unicode_minus"] = False
     return name
+
+
+def heavy_stroke(color: str, width: float = 0.8) -> list:
+    """나눔고딕 Bold 는 가늘어 보여 같은 색 윤곽선으로 굵기를 더한다. Pretendard 면 필요 없다."""
+    from matplotlib import patheffects
+
+    return [] if TITLE_WEIGHT == 700 else [patheffects.withStroke(linewidth=width, foreground=color)]
 
 
 # ---------------------------------------------------------------------------
 # 차트 공통: 그림 안 제목, 가격 차트 로그 눈금, 변화율
 # ---------------------------------------------------------------------------
 
-TITLE_WEIGHT = 600  # NanumGothicBold.ttf 는 weight 600 으로 등록된다
-
 
 def add_title(fig, text: str, x: float = 0.015, y: float = 0.975, fontsize: float | None = None) -> None:
-    """그림 왼쪽 위에 굵은 제목. 글자 크기는 그림 폭에 비례(텔레그램에서 같은 크기로 보이도록).
-
-    나눔고딕 Bold가 가늘어 보여 같은 색 윤곽선으로 굵기를 더한다.
-    """
-    from matplotlib import patheffects
-
+    """그림 왼쪽 위에 굵은 제목. 글자 크기는 그림 폭에 비례(텔레그램에서 같은 크기로 보이도록)."""
     fig.text(x, y, text, ha="left", va="top", fontsize=fontsize or 1.7 * fig.get_figwidth(),
-             fontweight=TITLE_WEIGHT, color="#111111",
-             path_effects=[patheffects.withStroke(linewidth=0.8, foreground="#111111")])
+             fontweight=TITLE_WEIGHT, color="#111111", path_effects=heavy_stroke("#111111"))
 
 
 def _nice_log_ticks(lo: float, hi: float) -> list[float]:
