@@ -131,7 +131,7 @@ def split_messages(header: str, blocks: list[list[str]], footer: str) -> list[st
 
 def prepare() -> Prepared:
     now = dt.datetime.now(dt.timezone.utc)
-    blocks, failed, errors, total = [], [], [], 0
+    blocks, failed, errors, total, found = [], [], [], 0, []
     with ThreadPoolExecutor(max_workers=5) as ex:
         futures = [(url, ex.submit(read_feed, url, now)) for url in FEEDS]
     for url, fut in futures:  # FEEDS 순서대로
@@ -142,13 +142,14 @@ def prepare() -> Prepared:
             errors.append(f"{feed_id(url)} {e}")
             continue
         if posts:
+            found.append((name, more_url, posts))
             blocks.append(group_block(name, posts, more_url))
             total += len(posts)
     header = f"🌞 블로그 새 글 {total}건" if total else "🌞 블로그 새 글 없음"
     footer = "확인 실패: " + esc(", ".join(failed)) if failed else ""
     chunks = split_messages(header, blocks, footer)
     return Prepared([Message("text", c, label=f"새 글 목록{i + 1 if len(chunks) > 1 else ''}", html=True)
-                     for i, c in enumerate(chunks)], errors)
+                     for i, c in enumerate(chunks)], errors, {"blogs": found, "failed": failed})
 
 
 if __name__ == "__main__":

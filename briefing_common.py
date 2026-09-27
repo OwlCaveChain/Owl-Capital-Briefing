@@ -159,17 +159,24 @@ def pct_change(v: float, prev: float) -> str:
 
 @dataclass
 class Message:
-    kind: str  # "text" | "photo"
+    kind: str  # "text" | "photo" | "album"(사진 여러 장, 캡션 없음)
     text: str  # 텍스트 본문 또는 사진 캡션
     path: Path | None = None
     label: str = ""  # 로그용 이름
     html: bool = False  # True면 text가 이미 텔레그램 HTML(이스케이프 완료)
+    paths: list[Path] = field(default_factory=list)  # album 의 사진들
+
+    @property
+    def images(self) -> list[Path]:
+        """이 메시지의 이미지 파일(사진 1장이면 [path], 앨범이면 paths)."""
+        return list(self.paths) if self.kind == "album" else ([self.path] if self.kind == "photo" and self.path else [])
 
 
 @dataclass
 class Prepared:
     messages: list[Message]
     errors: list[str] = field(default_factory=list)  # 부분 실패 사유(로그용)
+    data: dict = field(default_factory=dict)  # 사이트 생성에 다시 쓰는 원자료(예: 블로그 글 목록)
 
 
 def prepare_safely(module) -> Prepared:
@@ -184,12 +191,14 @@ def prepare_safely(module) -> Prepared:
 
 def send_messages(messages: list[Message], dry_run: bool = False) -> list[tuple[Message, str]]:
     """메시지를 순서대로 보내고 (메시지, 'message_id=N' 또는 '실패: 사유') 목록을 돌려준다."""
-    from telegram_send import TelegramError, send_photo, send_text
+    from telegram_send import TelegramError, send_media_group, send_photo, send_text
 
     results = []
     for m in messages:
         try:
-            if m.kind == "photo":
+            if m.kind == "album":
+                mid = send_media_group(m.paths, dry_run=dry_run)
+            elif m.kind == "photo":
                 mid = send_photo(m.path, m.text, html=m.html, dry_run=dry_run)
             else:
                 mid = send_text(m.text, html=m.html, dry_run=dry_run)

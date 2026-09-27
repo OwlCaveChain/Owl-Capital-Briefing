@@ -3,12 +3,15 @@
 ## 아침 브리핑 전체 실행 (`briefing.py`)
 
 ```
-python briefing.py            # data/ 브랜치 합치기 → 메시지 1~4·6 병렬 준비 → 1→2→3→4 전송 → charts.py(메시지 5) → 6 전송
-python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡션 출력
+python briefing.py            # data/ 브랜치 합치기 → 대시보드·메시지 1~4·6 병렬 준비 → 대시보드→섹터 전체표→1→2→3→4 전송
+                              # → charts.py(메시지 5) → 6 전송 → 사이트(docs/) 생성·main 커밋·푸시
+python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡션 출력, 사이트는 out/site/ 에 미리보기
+python briefing.py --dry-run --layout monday   # 섹터 전체표를 월요일형으로(확인용, 기본은 한국시간 요일)
 ```
 
 | # | 스크립트 | 내용 | 실패 시 텍스트 |
 |---|----------|------|----------------|
+| 0 | `dashboard.py` | 아침 대시보드(Overnight·Liquidity & credit·Sector leadership 상위 5/하위 3) → 섹터 전체표(22개). 캡션 없음, 아래 참고 | 지표별 "–", 그림 전체 실패 시 "대시보드 확인 실패"/"섹터 전체표 확인 실패" |
 | 1 | `fear_greed.py` | Fear & Greed 반원 게이지 + 이전 값 2x2 표(가로형 약 1.4:1, 캡션 "36 → 37"), 이어서 1년 타임라인(1-2, 캡션 "1주 전 N / 1개월 전 N / 1년 전 N"). 값은 CNN 페이지처럼 소수점 버림 | 게이지 실패 시 캡션을 텍스트로, 타임라인 실패 시 "Fear & Greed 타임라인 확인 실패", 데이터 실패 시 "Fear & Greed 항목 확인 실패" |
 | 2 | `blog_feed.py` | 블로그 RSS 최근 24시간 새 글, 첫 줄 "🌞 블로그 새 글 N건" | "🌞 블로그 새 글 없음" / 맨 아래 "확인 실패: 블로그명" |
 | 3 | `finviz_heatmap.py` | 핀비즈 S&P 500 히트맵 1일·4주·연초 대비(캡션 없음) | "핀비즈 히트맵 확인 실패" |
@@ -18,7 +21,33 @@ python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡�
 
 - 각 스크립트는 단독 실행도 된다(`python natgas.py --dry-run`).
 - 마지막에 메시지별 전송 결과(message_id 또는 실패 사유)와 실패 항목을 출력한다. 실패 항목이 있으면 종료 코드 1.
+- 텔레그램 전송이 모두 끝난 뒤 `site_build.build_from_briefing()`으로 전송 때 만든 이미지를 그대로 써서 docs/ 를 만들고
+  "briefing YYYY-MM-DD"로 main 에 커밋·푸시한다. 사이트가 실패해도 전송에는 영향이 없고 실패 항목에 "사이트: 사유"로 남는다(`--skip-site`로 생략).
 - 히트맵은 Playwright + `/opt/pw-browsers/chromium`(없으면 Playwright 기본, `CHROMIUM_PATH`로 변경 가능)을 쓴다.
+
+## 아침 대시보드 (`dashboard.py`, 메시지 0)
+
+| 구역 | 내용 | 출처 |
+|------|------|------|
+| Overnight | S&P500, 나스닥, 러셀2000, VIX, 금, 비트코인, EWY, 원달러 — 2열, 현재값·전일 대비 % | yfinance |
+| Liquidity & credit | 미 2년물(DGS2), 10년물(DGS10), 10년 실질금리(DFII10), 달러인덱스(DX-Y.NYB), 하이일드 스프레드(BAMLH0A0HYM2), 한국 CP 91일(ECOS 817Y002/010503000). 현재 / 전일 대비(금리 %p, 달러 %) / 1개월 추세(금리 ±0.05%p·달러 ±0.5% 미만 →) | FRED, yfinance, ECOS |
+| 경고 | 하이일드 스프레드 주간(금요일) 4주 연속 확대, 2년물 1개월(30일) 변화 ±0.25%p 이상이면 구역 아래 한 줄 | |
+| Sector leadership | SPY 대비 1개월(21거래일) 상대강도 상위 5·하위 3: 1일, 1개월, 전주 대비 순위 변화 | yfinance 수정주가 |
+| Leaders | `LEADERS` 목록이 비어 있으면 숨김 | |
+
+섹터 전체표: 22개 ETF(전체 지도 회색·관심 테마 청록·경기 신호 황색 띠, 표 아래 범례)를 상대강도 순위순으로.
+평일 열은 순위·ETF·1일·1개월·50일선·전주(순위 변화), 월요일(한국시간)은 1주·연초 대비·200일선·52주 고점을 더한 가로형.
+
+- 그림은 Pillow로 가로 1440px, 세로 최대 1800px(4:5). 서체 Pretendard(숫자 tabular figures), 제목 70px, 구역 제목 54px,
+  티커·등락률·핵심 숫자 54px 굵게, 본문 48px, 한글명·순위·Overnight 현재값은 48px 회색(보조). 바깥 여백은 좌우 24px.
+  넘치면 글씨를 줄이지 않고 두 장으로 나눈다: 대시보드는 Overnight + Liquidity / Sectors, 전체표는 1–11위 / 12–22위.
+  앨범은 격자로 줄어 보이므로 한 장씩 낱장(sendPhoto)으로 보낸다. 대시보드 섹터 구역의 상위 5와 하위 3 사이에는 굵은 선.
+- Pretendard 는 `bash setup_fonts.sh`로 설치한다(GitHub 릴리스, 실패하면 npm). 환경 설정 스크립트에 넣어 두고,
+  그림을 그릴 때 없으면 한 번 자동으로 실행한다. 그래도 없으면 나눔고딕으로 그리고 `[경고]`를 남긴다.
+- 상승 빨강·하락 파랑 + +/− 부호, 등락률 소수 1자리, 금리 2자리. 실패한 지표는 "–", 로그에 `[출처]`·`[경고]`.
+- 순위는 `data/sector_rank.csv`(date, 티커별 순위)에 시장 날짜로 매일 쌓는다. 비어 있는 최근 10거래일은 가격으로 거슬러 채운다.
+  순위 변화는 7일 이상 전의 마지막 기록과 비교.
+- 단독 실행 `python dashboard.py --dry-run [--monday|--weekday]`. `--dry-run` 없이 실행하면 대시보드·전체표만 텔레그램으로 보낸다.
 
 ## 텔레그램 전송 (`telegram_send.py`)
 
@@ -34,6 +63,7 @@ python briefing.py --dry-run  # 전송 없이 out/에 이미지만 저장, 캡�
 python telegram_send.py check
 python telegram_send.py text "본문"      # 여러 줄: printf '%s' "본문" | python telegram_send.py text -
 python telegram_send.py photo 파일.png "캡션"
+python telegram_send.py album 1.png 2.png   # 앨범(캡션 없음)
 ```
 
 ## 차트 브리핑 (`charts.py`)
@@ -102,7 +132,7 @@ DDR4 8Gb $46.107 (+0.47%)
 ## 브리핑 사이트 (`site_build.py`, GitHub Pages `docs/`)
 
 ```
-python site_build.py          # 텔레그램 전송 없이 메시지 1~6 이미지·캡션과 블로그 목록을 다시 만들어 docs/<오늘>.html 생성,
+python site_build.py          # 텔레그램 전송 없이 대시보드·섹터 전체표·메시지 1~6 이미지·캡션과 블로그 목록을 다시 만들어 docs/<오늘>.html 생성,
                               # index.html 을 그 페이지로, archive.html 에 날짜 추가, 마지막에 비밀값 검사
 python site_build.py --check  # docs/ 비밀값 검사만
 ```
@@ -113,7 +143,8 @@ python site_build.py --check  # docs/ 비밀값 검사만
   텔레그램·GitHub·AWS·Anthropic 토큰 형식과 `api.telegram.org/bot` 주소가 HTML에 있는지 본다. 찾으면 종료 코드 1(값은 출력하지 않음).
 - 모든 HTML `<head>`에 `<meta name="robots" content="noindex, nofollow, noarchive">`를 넣어 검색 결과에 나오지 않게 한다(링크를 아는 사람만).
   `--check`는 이 표시가 빠진 HTML이 있어도 실패한다. robots.txt로 막으면 검색엔진이 이 표시를 못 읽으므로 막지 않는다.
-- git 커밋·푸시는 하지 않는다.
+- 단독 실행은 git 커밋·푸시를 하지 않는다. `briefing.py`에서 부를 때(`build_from_briefing`)는 전송 때 만든 이미지
+  (차트는 charts.py가 남기는 `out/charts.json`)를 다시 쓰고, 검사를 통과하면 docs/ 를 main 에 커밋·푸시한다.
 
 ## data/ 보존: 모든 브랜치에서 합치기 (`data_merge.py`, `cleanup_data.py`)
 
