@@ -242,12 +242,13 @@ def build_page(date_key: str, date_label: str, stamp: str, msgs: dict[int, list[
 
     # 맨 앞: 아침 대시보드, 섹터 전체표(텔레그램과 같은 순서)
     for i, (label, slug) in enumerate((("대시보드", "dashboard"), ("섹터 전체표", "sectors"))):
-        m = next((m for m in msgs.get(0, []) if m.label.startswith(label)), None)
-        if m is None and i == 0 and msgs.get(0):
-            m = msgs[0][0]  # 대시보드 전체 실패 알림
-        if m is not None:
+        ms = [m for m in msgs.get(0, []) if m.label.startswith(label)]  # 낱장 여러 장("대시보드 1", "대시보드 2")
+        if not ms and i == 0 and msgs.get(0):
+            ms = msgs[0][:1]  # 대시보드 전체 실패 알림
+        if ms:
             title = "아침 대시보드" if slug == "dashboard" else "섹터 전체표"
-            parts.append(section(slug, title, page.message(m, slug, title)))
+            parts.append(section(slug, title, "".join(page.message(m, f"{slug}-{k}", title)
+                                                      for k, m in enumerate(ms, 1))))
 
     # 1 Fear & Greed
     body = "".join(page.message(m, f"fg-{i + 1}", "Fear & Greed 지수") for i, m in enumerate(msgs[1]))

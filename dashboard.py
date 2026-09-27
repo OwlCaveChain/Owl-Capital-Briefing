@@ -3,8 +3,9 @@
 1) Morning Dashboard: Overnight / Liquidity & credit / Sector leadership(상위 5·하위 3) / Leaders(목록이 정해지기 전까지 숨김)
 2) Sector leadership — full: 22개 ETF를 SPY 대비 1개월 상대강도 순위순으로. 월요일은 열이 늘고 가로형.
 
-이미지는 가로 1080px, 세로 최대 1350px(4:5). 넘치면 글씨를 줄이지 않고 두 장으로 나눠 앨범으로 보낸다
-(대시보드: "Overnight + Liquidity" / "Sectors", 전체표: 1–11위 / 12–22위). 캡션은 없다.
+이미지는 가로 1440px, 세로 최대 1800px(4:5), 서체 Pretendard(tabular figures). 넘치면 글씨를 줄이지 않고
+두 장으로 나눠 한 장씩 낱장으로 보낸다(대시보드: "Overnight + Liquidity" / "Sectors", 전체표: 1–11위 / 12–22위).
+캡션은 없다.
 
 출처: 가격 yfinance, 금리·스프레드 FRED, CP 91일 ECOS(817Y002/010503000). 실패한 지표는 "–"로 두고
 나머지는 그대로 그린다. 로그에 [출처]·[경고]를 남긴다. 섹터 순위는 data/sector_rank.csv 에 매일 쌓는다.
@@ -376,36 +377,68 @@ def collect() -> Collected:
 
 
 # ---------------------------------------------------------------------------
-# 그림(Pillow): 1080px 폭, 본문 36px 이상, 핵심 숫자 40px 이상, 제목 48px 이상
+# 그림(Pillow): 가로 1440px, 세로 최대 1800px(4:5). 글씨는 1080px 기준 크기의 4/3 배
+#   (제목 70, 구역 제목 54, 핵심 숫자·티커 54, 본문 48 = 1080px 기준 52·40·40·36)
+# 서체는 Pretendard(숫자는 tabular figures). 없으면 setup_fonts.sh 로 설치하고, 그래도 없으면 나눔고딕
 # ---------------------------------------------------------------------------
 
-WIDTH = 1080
-MAX_H = 1350
-PAD = 40  # 좌우 여백
-UP, DOWN, FLAT = "#D1302A", "#1D5BD6", "#8A9099"
-INK, SUB, RULE, STRIPE, WARN = "#15181D", "#6B7280", "#D5D9E0", "#F4F6F9", "#B4442F"
-FONT_DIR = Path("/usr/share/fonts/truetype")
-# 한글은 나눔고딕, 숫자·부호는 DejaVu Sans(자릿수 폭이 같고 −와 +의 폭이 같다)
-FONT_FILES = {
-    "ko": "nanum/NanumGothic.ttf", "ko_b": "nanum/NanumGothicBold.ttf",
-    "num": "dejavu/DejaVuSans.ttf", "num_b": "dejavu/DejaVuSans-Bold.ttf",
-}
-SIZE_TITLE, SIZE_HEAD, SIZE_BODY, SIZE_NUM = 52, 40, 36, 40
-ROW_H = 60  # 표 한 줄 높이(40px 숫자 기준)
-COL_GAP = 40
-FULL_GAP = 26  # 섹터 전체표 열 간격(평일 6개 열이 1080px에 들어가도록)
+WIDTH = 1440
+MAX_H = 1800
+PAD = 24  # 좌우 여백(내용이 폭을 최대한 쓰도록 작게)
+TOP, BOTTOM = 28, 24
+UP, DOWN, FLAT = "#D12A22", "#1A56D6", "#8A9099"
+INK, SUB, RULE, STRIPE, WARN = "#111418", "#5E6673", "#D3D8DF", "#EAEEF3", "#B4442F"
+STRONG_RULE = "#4B5360"  # 대시보드 섹터 구역 상위 5 / 하위 3 사이 굵은 선
+SIZE_TITLE, SIZE_HEAD, SIZE_BODY, SIZE_NUM = 70, 54, 48, 54
+ROW_H = 80  # 표 한 줄 높이(54px 숫자 기준)
+COL_GAP = 52
+FULL_GAP = 34  # 섹터 전체표 열 간격(평일 6개 열이 1440px에 들어가도록)
 
+PRETENDARD_DIRS = [Path("/usr/share/fonts/opentype/pretendard"), Path.home() / ".local/share/fonts/pretendard"]
+WEIGHT_FILES = {"r": "Regular", "m": "Medium", "sb": "SemiBold", "b": "Bold"}
+NANUM = {"r": "NanumGothic.ttf", "m": "NanumGothic.ttf", "sb": "NanumGothicBold.ttf", "b": "NanumGothicBold.ttf"}
 
 _fonts: dict = {}
+_font_dir: list = []  # [Path] 또는 [None](Pretendard 없음), 한 번만 찾는다
 
 
-def font(kind: str, size: int):
+def pretendard_dir() -> Path | None:
+    if not _font_dir:
+        def find():
+            return next((d for d in PRETENDARD_DIRS if (d / "Pretendard-Bold.otf").exists()), None)
+
+        d = find()
+        if d is None:
+            import subprocess
+
+            subprocess.run(["bash", str(ROOT / "setup_fonts.sh")], check=False, timeout=180)
+            d = find()
+            if d is None:
+                print("[경고] Pretendard 설치 실패, 나눔고딕으로 그립니다(숫자 폭이 고르지 않을 수 있음)",
+                      file=sys.stderr)
+        _font_dir.append(d)
+    return _font_dir[0]
+
+
+def font(weight: str, size: int):
     from PIL import ImageFont
 
-    key = (kind, size)
+    key = (weight, size)
     if key not in _fonts:
-        _fonts[key] = ImageFont.truetype(str(FONT_DIR / FONT_FILES[kind]), size)
+        d = pretendard_dir()
+        path = d / f"Pretendard-{WEIGHT_FILES[weight]}.otf" if d else \
+            Path("/usr/share/fonts/truetype/nanum") / NANUM[weight]
+        _fonts[key] = ImageFont.truetype(str(path), size)
     return _fonts[key]
+
+
+def _features():
+    from PIL import features
+
+    return ["tnum"] if features.check("raqm") else None  # 숫자 폭을 같게(tabular figures)
+
+
+FEATURES = None
 
 
 def fmt_signed(v: float, dec: int) -> str:
@@ -422,84 +455,83 @@ def sign_color(v: float | None, dec: int) -> str:
     return UP if v > 0 else DOWN
 
 
-def is_hangul(ch: str) -> bool:
-    return "가" <= ch <= "힣" or "㄰" <= ch <= "㆏"
-
-
-# 글자 조각: (문자열, 글꼴 종류, 크기, 색)
+# 글자 조각: (문자열, 굵기 r|m|sb|b, 크기, 색)
 Run = tuple
 
 
-def txt(text: str, size: int = SIZE_BODY, color: str = INK, bold: bool = False) -> list[Run]:
-    """한글이 섞인 문자열은 한글 부분만 나눔고딕으로 나눠 그린다."""
-    runs, buf, cur = [], "", None
-    for ch in text:
-        k = "ko" if is_hangul(ch) or (ch == " " and cur == "ko") else "num"
-        if cur is not None and k != cur:
-            runs.append((buf, cur + ("_b" if bold else ""), size, color))
-            buf = ""
-        buf, cur = buf + ch, k
-    if buf:
-        runs.append((buf, cur + ("_b" if bold else ""), size, color))
-    return runs
+def txt(text: str, size: int = SIZE_BODY, color: str = INK, weight: str = "m") -> list[Run]:
+    return [(text, weight, size, color)]
 
 
-def num(text: str, color: str = INK, size: int = SIZE_NUM, bold: bool = False) -> list[Run]:
-    return [(text, "num_b" if bold else "num", size, color)]
+def num(text: str, color: str = INK, size: int = SIZE_NUM, weight: str = "b") -> list[Run]:
+    return [(text, weight, size, color)]
+
+
+def _len(t: str, w: str, s: int) -> float:
+    global FEATURES
+    if FEATURES is None:
+        FEATURES = _features() or []
+    return font(w, s).getlength(t, features=FEATURES or None)
 
 
 def runs_width(runs: list[Run]) -> float:
-    return sum(font(k, s).getlength(t) for t, k, s, _ in runs)
+    return sum(_len(t, w, s) for t, w, s, _ in runs)
 
 
 class Canvas:
-    def __init__(self, width: int = WIDTH, height: int = 3000):
+    def __init__(self, width: int = WIDTH, height: int = 4000):
         from PIL import Image, ImageDraw
 
         self.img = Image.new("RGB", (width, height), "white")
         self.d = ImageDraw.Draw(self.img)
         self.w = width
-        self.y = 44
+        self.y = TOP
 
     def draw_runs(self, x: float, y_mid: float, runs: list[Run], align: str = "left") -> None:
         if align == "right":
             x -= runs_width(runs)
         elif align == "center":
             x -= runs_width(runs) / 2
-        for t, k, s, color in runs:
-            self.d.text((x, y_mid), t, font=font(k, s), fill=color, anchor="lm")
-            x += font(k, s).getlength(t)
+        for t, w, s, color in runs:
+            self.d.text((x, y_mid), t, font=font(w, s), fill=color, anchor="lm", features=FEATURES or None)
+            x += _len(t, w, s)
 
     def title(self, left: str, right: str = "") -> None:
-        h = 76
-        self.draw_runs(PAD, self.y + h / 2, txt(left, SIZE_TITLE, INK, bold=True))
+        h = 96
+        self.draw_runs(PAD, self.y + h / 2, txt(left, SIZE_TITLE, INK, "b"))
         if right:
-            self.draw_runs(self.w - PAD, self.y + h / 2 + 4, txt(right, SIZE_BODY, SUB), "right")
+            self.draw_runs(self.w - PAD, self.y + h / 2 + 5, txt(right, SIZE_BODY, SUB), "right")
         self.y += h + 14
 
-    def rule(self, gap: int = 26) -> None:
+    def rule(self, gap: int = 30) -> None:
         self.y += gap
-        self.d.line([(PAD, self.y), (self.w - PAD, self.y)], fill=RULE, width=2)
+        self.d.line([(PAD, self.y), (self.w - PAD, self.y)], fill=RULE, width=3)
         self.y += gap
 
     def heading(self, text: str, note: str = "") -> None:
-        h = 58
-        self.draw_runs(PAD, self.y + h / 2, txt(text, SIZE_HEAD, INK, bold=True))
+        h = 74
+        self.draw_runs(PAD, self.y + h / 2, txt(text, SIZE_HEAD, INK, "b"))
         if note:
             self.draw_runs(self.w - PAD, self.y + h / 2, txt(note, SIZE_BODY, SUB), "right")
         self.y += h + 8
 
-    def line(self, runs: list[Run], h: int = 56) -> None:
+    def line(self, runs: list[Run], h: int = 70) -> None:
         self.draw_runs(PAD, self.y + h / 2, runs)
         self.y += h
+
+    def stripe(self, h: int = ROW_H) -> None:
+        self.d.rectangle([PAD - 10, self.y, self.w - PAD + 10, self.y + h], fill=STRIPE)
 
     def table(self, header: list[str], aligns: list[str], rows: list[list[list[Run]]],
               bands: list[str | None] | None = None, stripe: bool = True, gap_after: set[int] = frozenset(),
               col_gap: int = COL_GAP) -> None:
-        """열 너비는 내용에 맞추고, 남는 폭은 둘째 열(이름) 뒤 간격으로 돌린다. 숫자 열은 오른쪽 정렬."""
+        """열 너비는 내용에 맞추고, 남는 폭은 둘째 열(이름) 뒤 간격으로 돌린다. 숫자 열은 오른쪽 정렬.
+
+        gap_after 의 줄 앞에는 굵은 구분선을 긋는다(대시보드 섹터 상위 5 / 하위 3).
+        """
         cells = [[txt(h, SIZE_BODY, SUB) for h in header]] + rows
         widths = [max(runs_width(r[i]) for r in cells) for i in range(len(header))]
-        band_w = 12 if bands else 0
+        band_w = 18 if bands else 0
         inner = self.w - 2 * PAD - band_w
         spare = inner - sum(widths) - col_gap * (len(widths) - 1)
         gaps = [col_gap] * (len(widths) - 1)
@@ -509,22 +541,22 @@ class Canvas:
         for i, w in enumerate(widths):
             xs.append(x)
             x += w + (gaps[i] if i < len(gaps) else 0)
-        # 머리글
-        hh = 52
+        hh = 66
         for i, h in enumerate(cells[0]):
             self.draw_runs(xs[i] + (widths[i] if aligns[i] == "right" else 0), self.y + hh / 2, h,
                            "right" if aligns[i] == "right" else "left")
         self.y += hh
-        self.d.line([(PAD, self.y), (self.w - PAD, self.y)], fill=RULE, width=2)
-        self.y += 4
+        self.d.line([(PAD, self.y), (self.w - PAD, self.y)], fill=RULE, width=3)
+        self.y += 5
         for n, row in enumerate(rows):
             if n in gap_after:
-                self.d.line([(PAD, self.y + 5), (self.w - PAD, self.y + 5)], fill=RULE, width=2)
-                self.y += 12
+                self.y += 8
+                self.d.line([(PAD - 10, self.y), (self.w - PAD + 10, self.y)], fill=STRONG_RULE, width=6)
+                self.y += 11
             if stripe and n % 2 == 1:
-                self.d.rectangle([PAD - 12, self.y, self.w - PAD + 12, self.y + ROW_H], fill=STRIPE)
+                self.stripe()
             if bands and bands[n]:
-                self.d.rectangle([PAD, self.y + 10, PAD + 7, self.y + ROW_H - 10], fill=bands[n])
+                self.d.rectangle([PAD, self.y + 13, PAD + 9, self.y + ROW_H - 13], fill=bands[n])
             for i, c in enumerate(row):
                 self.draw_runs(xs[i] + (widths[i] if aligns[i] == "right" else 0), self.y + ROW_H / 2, c,
                                "right" if aligns[i] == "right" else "left")
@@ -534,11 +566,10 @@ class Canvas:
     def needed_width(header, rows, bands=False, col_gap: int = COL_GAP) -> int:
         cells = [[txt(h, SIZE_BODY, SUB) for h in header]] + rows
         widths = [max(runs_width(r[i]) for r in cells) for i in range(len(header))]
-        return int(sum(widths) + col_gap * (len(widths) - 1) + 2 * PAD + (12 if bands else 0)) + 1
+        return int(sum(widths) + col_gap * (len(widths) - 1) + 2 * PAD + (18 if bands else 0)) + 1
 
-    def finish(self, path: Path, bottom: int = 40) -> Path:
-        h = self.y + bottom
-        self.img.crop((0, 0, self.w, h)).save(path, optimize=True)
+    def finish(self, path: Path) -> Path:
+        self.img.crop((0, 0, self.w, self.y + BOTTOM)).save(path, optimize=True)
         return path
 
 
@@ -557,8 +588,13 @@ def cell_rate_change(v: float | None) -> list[Run]:
     return num(fmt_signed(v, 2) + "%p", sign_color(v, 2))
 
 
-def cell_value(v: float | None, dec: int, suffix: str = "") -> list[Run]:
-    return num(DASH, FLAT) if v is None else num(f"{v:,.{dec}f}{suffix}", INK, bold=True)
+def cell_value(v: float | None, dec: int, suffix: str = "", secondary: bool = False) -> list[Run]:
+    """현재값. secondary 면 한 단계 작은 회색(보조 숫자)."""
+    if v is None:
+        return num(DASH, FLAT, SIZE_BODY if secondary else SIZE_NUM)
+    if secondary:
+        return num(f"{v:,.{dec}f}{suffix}", SUB, SIZE_BODY, "m")
+    return num(f"{v:,.{dec}f}{suffix}", INK, SIZE_NUM, "sb")
 
 
 def cell_trend(arrow: str | None) -> list[Run]:
@@ -578,15 +614,16 @@ def cell_rank_change(v: int | None) -> list[Run]:
 def cell_above(v: bool | None) -> list[Run]:
     if v is None:
         return num(DASH, FLAT)
-    return txt("위", SIZE_BODY, UP) if v else txt("아래", SIZE_BODY, DOWN)
+    return txt("위", SIZE_BODY, UP, "sb") if v else txt("아래", SIZE_BODY, DOWN, "sb")
 
 
 def cell_etf(r: SectorRow) -> list[Run]:
-    return num(r.ticker, INK, SIZE_BODY, bold=True) + txt(" " + r.name, SIZE_BODY, INK)
+    """티커는 굵고 진하게, 한글명은 옆에 한 단계 작은 회색."""
+    return num(r.ticker, INK, SIZE_NUM, "b") + txt("  " + r.name, SIZE_BODY, SUB, "m")
 
 
 def cell_rank(r: SectorRow) -> list[Run]:
-    return num(DASH if r.rank is None else str(r.rank), SUB, SIZE_BODY)
+    return num(DASH if r.rank is None else str(r.rank), SUB, SIZE_BODY, "m")
 
 
 def date_label(d) -> str:
@@ -594,20 +631,22 @@ def date_label(d) -> str:
 
 
 def draw_overnight(cv: Canvas, rows: list[Row]) -> None:
+    """2열. 이름은 굵게, 현재값은 보조 숫자(작은 회색), 등락률은 굵고 진하게."""
     cv.heading("Overnight")
-    col_w = (cv.w - 2 * PAD - 40) / 2
-    pct_w = max(runs_width(cell_pct(r.change)) for r in rows) + 18
+    mid_gap = 56
+    col_w = (cv.w - 2 * PAD - mid_gap) / 2
+    pct_w = max(runs_width(cell_pct(r.change)) for r in rows) + 22
+    h = ROW_H + 6
     for n in range(0, len(rows), 2):
         if (n // 2) % 2 == 1:
-            cv.d.rectangle([PAD - 12, cv.y, cv.w - PAD + 12, cv.y + ROW_H + 4], fill=STRIPE)
+            cv.stripe(h)
         for k, r in enumerate(rows[n:n + 2]):
-            x0 = PAD + k * (col_w + 40)
-            ym = cv.y + (ROW_H + 4) / 2
-            cv.draw_runs(x0, ym, txt(r.name, SIZE_BODY, INK))
-            pct = cell_pct(r.change)
-            cv.draw_runs(x0 + col_w, ym, pct, "right")
-            cv.draw_runs(x0 + col_w - pct_w, ym, cell_value(r.value, r.decimals), "right")
-        cv.y += ROW_H + 4
+            x0 = PAD + k * (col_w + mid_gap)
+            ym = cv.y + h / 2
+            cv.draw_runs(x0, ym, txt(r.name, SIZE_BODY + 2, INK, "b"))
+            cv.draw_runs(x0 + col_w, ym, cell_pct(r.change), "right")
+            cv.draw_runs(x0 + col_w - pct_w, ym, cell_value(r.value, r.decimals, secondary=True), "right")
+        cv.y += h
 
 
 def draw_liquidity(cv: Canvas, rows: list[Row], warnings: list[str]) -> None:
@@ -616,11 +655,12 @@ def draw_liquidity(cv: Canvas, rows: list[Row], warnings: list[str]) -> None:
     for r in rows:
         suffix = "%" if r.kind == "rate" else ""
         change = cell_rate_change(r.change) if r.kind == "rate" else cell_pct(r.change)
-        body.append([txt(r.name), cell_value(r.value, 2, suffix), change, cell_trend(r.trend)])
+        body.append([txt(r.name, SIZE_BODY, INK, "m"), cell_value(r.value, 2, suffix), change,
+                     cell_trend(r.trend)])
     cv.table(["", "현재", "전일 대비", "1개월"], ["left", "right", "right", "right"], body)
     for w in warnings:
-        cv.y += 6
-        cv.line(num("⚠ ", WARN, SIZE_BODY) + txt(w, SIZE_BODY, WARN, bold=True))
+        cv.y += 8
+        cv.line(txt("⚠ " + w, SIZE_BODY, WARN, "b"))
 
 
 def sector_short_rows(sectors: list[SectorRow]) -> tuple[list[SectorRow], int]:
@@ -632,8 +672,8 @@ def sector_short_rows(sectors: list[SectorRow]) -> tuple[list[SectorRow], int]:
 
 def draw_sector_short(cv: Canvas, sectors: list[SectorRow]) -> None:
     cv.heading("Sector leadership")
-    cv.line(txt("SPY 대비 1개월 상대강도 · 전주: 순위 변화", SIZE_BODY, SUB), 48)
-    cv.y += 8
+    cv.line(txt("SPY 대비 1개월 상대강도 · 전주: 순위 변화", SIZE_BODY, SUB), 64)
+    cv.y += 6
     rows, cut = sector_short_rows(sectors)
     body = [[cell_rank(r), cell_etf(r), cell_pct(r.d1), cell_pct(r.m1), cell_rank_change(r.rank_change)]
             for r in rows]
@@ -657,7 +697,7 @@ def render_dashboard(c: Collected, day: dt.date) -> list[Path]:
     one.rule()
     draw_sector_short(one, c.sectors)
     # ④ Leaders: LEADERS 가 비어 있으면 숨김
-    if one.y + 40 <= MAX_H:
+    if one.y + BOTTOM <= MAX_H:
         return [one.finish(OUT_DIR / "m0_dashboard.png")]
 
     a = Canvas()
@@ -687,19 +727,19 @@ def full_columns(monday: bool):
 
 
 def draw_legend(cv: Canvas) -> None:
-    cv.y += 18
-    x, ym = PAD, cv.y + 26
+    cv.y += 22
+    x, ym = PAD, cv.y + 34
     for name, color in GROUPS.values():
-        cv.d.rectangle([x, ym - 16, x + 8, ym + 16], fill=color)
-        x += 22
+        cv.d.rectangle([x, ym - 22, x + 11, ym + 22], fill=color)
+        x += 28
         runs = txt(name, SIZE_BODY, SUB)
         cv.draw_runs(x, ym, runs)
-        x += runs_width(runs) + 44
-    cv.y += 52
+        x += runs_width(runs) + 56
+    cv.y += 68
 
 
 def render_full(c: Collected, day: dt.date, monday: bool) -> list[Path]:
-    """22개 전체. 4:5(월요일 가로형은 세로 1080px 이하)에 안 들어가면 1–11위 / 12–22위 2장."""
+    """22개 전체. 4:5(월요일 가로형은 세로가 가로보다 짧게)에 안 들어가면 1–11위 / 12–22위 2장."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for f in OUT_DIR.glob("m0_sectors*.png"):
         f.unlink()
@@ -717,14 +757,14 @@ def render_full(c: Collected, day: dt.date, monday: bool) -> list[Path]:
         cv = Canvas(width)
         cv.title("Sector leadership — full", right)
         cv.line(txt("SPY 대비 1개월 상대강도 순위" + (f" · {part}" if part else "") + " · 전주: 순위 변화",
-                    SIZE_BODY, SUB), 48)
-        cv.y += 8
+                    SIZE_BODY, SUB), 64)
+        cv.y += 6
         cv.table(header, aligns, rows_of(items), bands=[GROUPS[r.group][1] for r in items], col_gap=FULL_GAP)
         draw_legend(cv)
         return cv, OUT_DIR / name
 
     cv, path = draw(c.sectors, "", "m0_sectors.png")
-    if cv.y + 40 <= max_h:
+    if cv.y + BOTTOM <= max_h:
         return [cv.finish(path)]
     half = (len(c.sectors) + 1) // 2
     first, second = c.sectors[:half], c.sectors[half:]
@@ -737,10 +777,11 @@ def render_full(c: Collected, day: dt.date, monday: bool) -> list[Path]:
     return out
 
 
-def as_message(paths: list[Path], label: str) -> Message:
+def as_messages(paths: list[Path], label: str) -> list[Message]:
+    """한 장씩 낱장으로 보낸다(앨범은 격자로 줄어 작게 보인다). 캡션 없음."""
     if len(paths) == 1:
-        return Message("photo", "", paths[0], label)
-    return Message("album", "", None, label, paths=paths)
+        return [Message("photo", "", paths[0], label)]
+    return [Message("photo", "", p, f"{label} {i}") for i, p in enumerate(paths, 1)]
 
 
 def prepare() -> Prepared:
@@ -752,7 +793,7 @@ def prepare() -> Prepared:
     for label, fn in (("대시보드", lambda: render_dashboard(c, today)),
                       ("섹터 전체표", lambda: render_full(c, today, monday))):
         try:
-            msgs.append(as_message(fn(), label))
+            msgs.extend(as_messages(fn(), label))
         except Exception as e:  # noqa: BLE001
             import traceback
 
@@ -760,7 +801,7 @@ def prepare() -> Prepared:
             errors.append(f"{label} 그리기 실패: {type(e).__name__}: {e}"[:200])
             msgs.append(Message("text", f"{label} 확인 실패", label=f"{label} 실패 알림"))
     print(f"[대시보드] {'월요일형' if monday else '평일형'}, 섹터 기준일 {day}, "
-          + ", ".join(f"{m.label} {len(m.images)}장" for m in msgs))
+          + ", ".join(m.label for m in msgs))
     return Prepared(msgs, errors)
 
 

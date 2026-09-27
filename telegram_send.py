@@ -190,7 +190,9 @@ def send_photo(path: str | Path, caption: str = "", *, html: bool = False, dry_r
     data = {"caption": body, "parse_mode": "HTML"} if body else {}  # 제목이 그림 안에 있으면 캡션 없음
     res = _call("sendPhoto", data, files={"photo": path})
     mid = res.get("message_id")
-    print(f"[telegram] ok message_id={mid} (사진 {path.name})")
+    big = max(res.get("photo") or [{}], key=lambda p: p.get("width", 0) * p.get("height", 0))
+    size = f", 텔레그램 보관 {big['width']}x{big['height']}" if big.get("width") else ""
+    print(f"[telegram] ok message_id={mid} (사진 {path.name}{size})")
     return mid
 
 
