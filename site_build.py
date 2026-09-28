@@ -122,13 +122,15 @@ def collect_messages() -> dict[int, list[Message]]:
     items = [(0, dashboard), (1, fear_greed), (3, finviz_heatmap), (4, natgas), (6, memory)]
     with ThreadPoolExecutor(max_workers=len(items)) as ex:
         futures = {no: ex.submit(prepare_safely, mod) for no, mod in items}
-    out = {}
-    for no, mod in items:
-        p = futures[no].result()
+    return {no: site_messages(futures[no].result(), mod) for no, mod in items}
+
+
+def site_messages(p: Prepared, mod=None) -> list[Message]:
+    """사이트에 싣는 메시지. 대시보드(0)는 텔레그램용과 달리 data["site"](모든 열이 든 섹터 표)를 쓴다."""
+    if mod is not None:
         for err in p.errors:
             print(f"[{mod.NAME}] {err}", file=sys.stderr)
-        out[no] = p.messages
-    return out
+    return p.data.get("site") or p.messages
 
 
 def collect_charts() -> list[tuple[str, Message]]:
@@ -402,7 +404,7 @@ def build_from_briefing(prepared: dict[int, Prepared], dry_run: bool) -> str:
     dry-run 은 out/site/ 에 미리보기만 만들고, 아니면 docs/ 에 만들어 main 에 커밋·푸시한다.
     실패하면 예외(briefing.py 가 "사이트" 실패 항목으로 표시). 성공하면 요약 문자열.
     """
-    msgs = {no: p.messages for no, p in prepared.items()}
+    msgs = {no: site_messages(p) for no, p in prepared.items()}
     blog = prepared.get(2)
     blogs = blog.data.get("blogs", []) if blog else []
     failed_blogs = blog.data.get("failed", []) if blog else []

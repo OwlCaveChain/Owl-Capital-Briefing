@@ -1,7 +1,8 @@
 """메시지 0: 아침 대시보드 + 섹터 전체표(메시지 1 Fear & Greed 앞에 보낸다).
 
 1) Morning Dashboard: Overnight / Liquidity & credit / Sector leadership(상위 5·하위 3) / Leaders(목록이 정해지기 전까지 숨김)
-2) Sector leadership — full: 22개 ETF를 SPY 대비 1개월 상대강도 순위순으로. 월요일은 열이 늘고 가로형.
+2) Sector leadership — full: 22개 ETF를 SPY 대비 1개월 상대강도 순위순으로(매일 같은 1440px 표).
+3) 월요일에만 주간판: 같은 순위순으로 1주·연초 대비·200일선·52주 고점. 사이트에는 매일 모든 열이 든 표.
 
 이미지는 가로 1440px, 세로 최대 1800px(4:5), 서체 Pretendard(tabular figures). 넘치면 글씨를 줄이지 않고
 두 장으로 나눠 한 장씩 낱장으로 보낸다(대시보드: "Overnight + Liquidity" / "Sectors", 전체표: 1–11위 / 12–22위).
@@ -11,7 +12,7 @@
 나머지는 그대로 그린다. 로그에 [출처]·[경고]를 남긴다. 섹터 순위는 data/sector_rank.csv 에 매일 쌓는다.
 
 단독 실행: python dashboard.py [--dry-run] [--monday | --weekday]
-  --monday/--weekday  요일과 관계없이 월요일형/평일형으로 그린다(기본은 한국시간 오늘 요일).
+  --monday/--weekday  요일과 관계없이 주간판을 보낸다/안 보낸다(기본은 한국시간 오늘이 월요일인지).
 """
 
 from __future__ import annotations
@@ -691,19 +692,26 @@ def render_dashboard(c: Collected, day: dt.date) -> list[Path]:
     return [a.finish(OUT_DIR / "m0_dashboard_1.png"), b.finish(OUT_DIR / "m0_dashboard_2.png")]
 
 
-def full_columns(monday: bool):
-    cols = [("순위", "right", cell_rank), ("ETF", "left", cell_etf), ("1일", "right", lambda r: cell_pct(r.d1))]
-    if monday:
-        cols.append(("1주", "right", lambda r: cell_pct(r.w1)))
-    cols.append(("1개월", "right", lambda r: cell_pct(r.m1)))
-    if monday:
-        cols.append(("연초 대비", "right", lambda r: cell_pct(r.ytd)))
-    cols.append(("50일선", "right", lambda r: cell_above(r.above50)))
-    if monday:
-        cols += [("200일선", "right", lambda r: cell_above(r.above200)),
-                 ("52주 고점", "right", lambda r: cell_pct(r.from_high))]
-    cols.append(("전주", "right", lambda r: cell_rank_change(r.rank_change)))
-    return cols
+# 섹터 표 종류: 평일·월요일 텔레그램 표(daily), 월요일에만 따로 보내는 주간판(weekly), 사이트용 전체 열(all)
+DAILY_EXTRA = ("1주", "연초 대비", "200일선", "52주 고점")  # 주간판 열(daily 에는 없음)
+
+
+def full_columns(kind: str):
+    """kind: "daily"(순위·ETF·1일·1개월·50일선·전주), "weekly"(순위·ETF·1주·연초 대비·200일선·52주 고점),
+    "all"(모두, 사이트용)."""
+    cols = [("순위", "right", cell_rank), ("ETF", "left", cell_etf),
+            ("1일", "right", lambda r: cell_pct(r.d1)),
+            ("1주", "right", lambda r: cell_pct(r.w1)),
+            ("1개월", "right", lambda r: cell_pct(r.m1)),
+            ("연초 대비", "right", lambda r: cell_pct(r.ytd)),
+            ("50일선", "right", lambda r: cell_above(r.above50)),
+            ("200일선", "right", lambda r: cell_above(r.above200)),
+            ("52주 고점", "right", lambda r: cell_pct(r.from_high)),
+            ("전주", "right", lambda r: cell_rank_change(r.rank_change))]
+    if kind == "all":
+        return cols
+    keep = {"순위", "ETF"} | (set(DAILY_EXTRA) if kind == "weekly" else {"1일", "1개월", "50일선", "전주"})
+    return [c for c in cols if c[0] in keep]
 
 
 def draw_legend(cv: Canvas) -> None:
@@ -718,33 +726,44 @@ def draw_legend(cv: Canvas) -> None:
     cv.y += 68
 
 
-def render_full(c: Collected, day: dt.date, monday: bool) -> list[Path]:
-    """22개 전체. 4:5(월요일 가로형은 세로가 가로보다 짧게)에 안 들어가면 1–11위 / 12–22위 2장."""
+FULL_KINDS = {  # kind: (파일 이름, 제목, 부제 앞부분)
+    "daily": ("m0_sectors", "Sector leadership — full", "SPY 대비 1개월 상대강도 순위"),
+    "weekly": ("m0_weekly", "Sector leadership — weekly", "주간판 · SPY 대비 1개월 상대강도 순위순"),
+    "all": ("m0_site_sectors", "Sector leadership — full", "SPY 대비 1개월 상대강도 순위"),
+}
+
+
+def render_full(c: Collected, day: dt.date, kind: str = "daily") -> list[Path]:
+    """22개 전체를 순위순으로. daily·weekly 는 1440px, 4:5 에 안 들어가면 1–11위 / 12–22위 2장.
+    all(사이트용)은 열이 많아 더 넓고, 나누지 않고 한 장."""
+    stem, title, sub = FULL_KINDS[kind]
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for f in OUT_DIR.glob("m0_sectors*.png"):
-        f.unlink()
-    cols = full_columns(monday)
+    for f in [OUT_DIR / f"{stem}.png", *OUT_DIR.glob(f"{stem}_*.png")]:
+        f.unlink(missing_ok=True)
+    cols = full_columns(kind)
     header, aligns = [h for h, _, _ in cols], [a for _, a, _ in cols]
 
     def rows_of(items):
         return [[fn(r) for _, _, fn in cols] for r in items]
 
-    width = max(WIDTH, Canvas.needed_width(header, rows_of(c.sectors), bands=True, col_gap=FULL_GAP))
-    max_h = MAX_H if width <= WIDTH else min(MAX_H, width - 1)  # 가로형이면 세로가 가로보다 짧게
+    gap = 28 if kind == "weekly" else FULL_GAP  # 주간판은 "52주 고점"·"연초 대비" 머리글이 길어 간격을 줄인다
+    width = max(WIDTH, Canvas.needed_width(header, rows_of(c.sectors), bands=True, col_gap=gap))
+    if kind != "all" and width > WIDTH:
+        print(f"[경고] 섹터 표({kind}) 폭 {width}px > {WIDTH}px", file=sys.stderr)
     right = date_label(day)
+    note = "" if kind == "weekly" else " · 전주: 순위 변화"
 
     def draw(items, part: str, name: str) -> tuple[Canvas, Path]:
         cv = Canvas(width)
-        cv.title("Sector leadership — full", right)
-        cv.line(txt("SPY 대비 1개월 상대강도 순위" + (f" · {part}" if part else "") + " · 전주: 순위 변화",
-                    SIZE_BODY, SUB), 64)
+        cv.title(title, right)
+        cv.line(txt(sub + (f" · {part}" if part else "") + note, SIZE_BODY, SUB), 64)
         cv.y += 6
-        cv.table(header, aligns, rows_of(items), bands=[GROUPS[r.group][1] for r in items], col_gap=FULL_GAP)
+        cv.table(header, aligns, rows_of(items), bands=[GROUPS[r.group][1] for r in items], col_gap=gap)
         draw_legend(cv)
         return cv, OUT_DIR / name
 
-    cv, path = draw(c.sectors, "", "m0_sectors.png")
-    if cv.y + BOTTOM <= max_h:
+    cv, path = draw(c.sectors, "", f"{stem}.png")
+    if kind == "all" or cv.y + BOTTOM <= MAX_H:
         return [cv.finish(path)]
     half = (len(c.sectors) + 1) // 2
     first, second = c.sectors[:half], c.sectors[half:]
@@ -752,7 +771,7 @@ def render_full(c: Collected, day: dt.date, monday: bool) -> list[Path]:
     hi = lambda items: items[-1].rank or "–"  # noqa: E731
     out = []
     for i, items in enumerate((first, second), 1):
-        cv, path = draw(items, f"{lo(items)}–{hi(items)}위", f"m0_sectors_{i}.png")
+        cv, path = draw(items, f"{lo(items)}–{hi(items)}위", f"{stem}_{i}.png")
         out.append(cv.finish(path))
     return out
 
@@ -765,24 +784,32 @@ def as_messages(paths: list[Path], label: str) -> list[Message]:
 
 
 def prepare() -> Prepared:
+    """텔레그램: 대시보드 → 섹터 전체표(평일과 같은 1440px) → 월요일만 주간판.
+    사이트용(data["site"]): 대시보드 → 모든 열이 들어간 섹터 전체표(매일)."""
     c = collect()
     monday = is_monday_layout()
     day = c.sector_date.date() if c.sector_date is not None else now_kst().date()
     today = now_kst().date()
-    msgs, errors = [], list(c.errors)
-    for label, fn in (("대시보드", lambda: render_dashboard(c, today)),
-                      ("섹터 전체표", lambda: render_full(c, today, monday))):
+    msgs, site, errors = [], [], list(c.errors)
+
+    def render(label, fn) -> list[Message]:
         try:
-            msgs.extend(as_messages(fn(), label))
+            return as_messages(fn(), label)
         except Exception as e:  # noqa: BLE001
             import traceback
 
             traceback.print_exc(file=sys.stderr)
             errors.append(f"{label} 그리기 실패: {type(e).__name__}: {e}"[:200])
-            msgs.append(Message("text", f"{label} 확인 실패", label=f"{label} 실패 알림"))
-    print(f"[대시보드] {'월요일형' if monday else '평일형'}, 섹터 기준일 {day}, "
+            return [Message("text", f"{label} 확인 실패", label=f"{label} 실패 알림")]
+
+    dash = render("대시보드", lambda: render_dashboard(c, today))
+    msgs += dash + render("섹터 전체표", lambda: render_full(c, today, "daily"))
+    if monday:
+        msgs += render("주간판", lambda: render_full(c, today, "weekly"))
+    site += dash + render("섹터 전체표", lambda: render_full(c, today, "all"))
+    print(f"[대시보드] {'월요일(주간판 포함)' if monday else '평일'}, 섹터 기준일 {day}, "
           + ", ".join(m.label for m in msgs))
-    return Prepared(msgs, errors)
+    return Prepared(msgs, errors, {"site": site})
 
 
 if __name__ == "__main__":
