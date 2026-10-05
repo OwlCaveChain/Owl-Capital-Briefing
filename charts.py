@@ -673,7 +673,9 @@ def chart_ibb_soxx() -> ChartResult:
     date_axis(ax, pd.Timestamp(YEAR_START), max(ra.index[-1], rb.index[-1]))
     legend(ax)
     title = "바이오테크 · 반도체 (연초=100)"
-    cap = caption(title, [f"IBB {latest(ra, '.1f', pct=True)}", f"SOXX {latest(rb, '.1f', pct=True)}"],
+    # 캡션은 연초=100 지수가 아니라 실제 종가(달러)와 전일 대비
+    cap = caption(title, [f"IBB {latest(a.series, '.2f', prefix='$', pct=True)}",
+                          f"SOXX {latest(b.series, '.2f', prefix='$', pct=True)}"],
                   [a.source, b.source])
     return ChartResult(save(fig, "6_ibb_soxx"), cap)
 

@@ -87,7 +87,7 @@ python telegram_send.py album 1.png 2.png   # 앨범(캡션 없음)
 | 3 | WTI·브렌트·두바이 (올해 1월~) | 페트로넷 일일국제원유가격: 두바이 현물, 브렌트 ICE 선물, WTI NYMEX 선물. 캡션에 브렌트 현물 프리미엄(FRED DCOILBRENTEU − 브렌트 선물, 공통 최근일) | WTI Yahoo CL=F, 브렌트 Yahoo BZ=F, 두바이 FRED POILDUBUSDM(IMF 월평균) |
 | 4 | 미 가솔린 소매가격 (2022-01~) | FRED GASREGW | 없음 |
 | 5 | DTCR(좌)·NVDA(우) (2023-01~) | Yahoo(yfinance) | stooq |
-| 6 | IBB·SOXX(반도체 ETF) 연초=100 | Yahoo(yfinance) | stooq |
+| 6 | IBB·SOXX(반도체 ETF) 연초=100, 캡션은 종가(달러) | Yahoo(yfinance) | stooq |
 
 ### 실행
 
