@@ -653,10 +653,10 @@ def chart_dtcr_nvda() -> ChartResult:
     return ChartResult(save(fig, "5_dtcr_nvda"), cap)
 
 
-def chart_ibb_sox() -> ChartResult:
+def chart_ibb_soxx() -> ChartResult:
     fetch_start = YEAR_START - dt.timedelta(days=14)
     a = fetch_chain("IBB", _stock_chain("IBB", "ibb.us", fetch_start))
-    b = fetch_chain("SOX", _stock_chain("^SOX", "^sox", fetch_start))
+    b = fetch_chain("SOXX", _stock_chain("SOXX", "soxx.us", fetch_start))
 
     def rebase(s: pd.Series) -> pd.Series:
         base_part = s[s.index < pd.Timestamp(YEAR_START)]
@@ -666,16 +666,16 @@ def chart_ibb_sox() -> ChartResult:
     ra, rb = rebase(a.series), rebase(b.series)
     fig, ax = new_figure()
     ax.plot(ra.index, ra.values, color=COLORS[0], lw=LINE_WIDTH, label="나스닥 바이오테크 IBB")
-    ax.plot(rb.index, rb.values, color=COLORS[1], lw=LINE_WIDTH, label="필라델피아 반도체 SOX")
+    ax.plot(rb.index, rb.values, color=COLORS[1], lw=LINE_WIDTH, label="반도체 ETF SOXX")
     ax.axhline(100, color="#999999", lw=0.8)
     unit_label(ax, f"({TODAY.year % 100}/01/01=100)")
     log_price_axis(ax, pd.concat([ra, rb]).values)
     date_axis(ax, pd.Timestamp(YEAR_START), max(ra.index[-1], rb.index[-1]))
     legend(ax)
     title = "바이오테크 · 반도체 (연초=100)"
-    cap = caption(title, [f"IBB {latest(ra, '.1f', pct=True)}", f"SOX {latest(rb, '.1f', pct=True)}"],
+    cap = caption(title, [f"IBB {latest(ra, '.1f', pct=True)}", f"SOXX {latest(rb, '.1f', pct=True)}"],
                   [a.source, b.source])
-    return ChartResult(save(fig, "6_ibb_sox"), cap)
+    return ChartResult(save(fig, "6_ibb_soxx"), cap)
 
 
 CHARTS = [
@@ -684,7 +684,7 @@ CHARTS = [
     (3, "유가", chart_oil),
     (4, "미 가솔린 소매가격", chart_gasoline),
     (5, "데이터센터 ETF·엔비디아", chart_dtcr_nvda),
-    (6, "바이오테크·반도체 연초 대비", chart_ibb_sox),
+    (6, "바이오테크·반도체 연초 대비", chart_ibb_soxx),
 ]
 
 

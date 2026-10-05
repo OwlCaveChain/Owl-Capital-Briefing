@@ -66,7 +66,7 @@ Pretendard 1.3.9 Regular·Medium·Bold(`fonts/Pretendard-*.otf`)와 라이선스
 전송은 항상 `parse_mode=HTML`(링크 미리보기 끔). `html=False`(기본)면 본문을 자동 이스케이프하고, dry-run은 텔레그램에 보일 글자 그대로 출력한다.
 
 캡션에는 숫자만: 제목 줄 없이 시리즈마다 한 줄. 차트에는 큰 제목을 따로 두지 않고 범례로 알 수 있게 한다(국채금리·유가는 범례 위에 같은 크기로 "주요국 10년 국채금리"·"유가"). 히트맵은 제목·캡션 없이 보낸다.
-가격 차트는 변화를 퍼센트만(`$92.41 (-2.3%)`), 금리·스프레드는 %p. 로그 눈금(`log_price_axis`, 눈금 글자는 일반 숫자)은 가격 차트(유가, 가솔린, 천연가스, DTCR·NVDA, IBB·SOX)에만 쓰고, 스프레드·국채금리·Fear & Greed는 일반 눈금.
+가격 차트는 변화를 퍼센트만(`$92.41 (-2.3%)`), 금리·스프레드는 %p. 로그 눈금(`log_price_axis`, 눈금 글자는 일반 숫자)은 가격 차트(유가, 가솔린, 천연가스, DTCR·NVDA, IBB·SOXX)에만 쓰고, 스프레드·국채금리·Fear & Greed는 일반 눈금.
 출처는 캡션에 쓰지 않고 실행 로그(`[출처]`, 금리 차트는 나라별)에만 남긴다. 대체 출처를 쓰면 1순위 실패 사유를 `[경고]`로 남긴다. 날짜는 직전 영업일보다 오래된 값에만 `(9/22)`처럼 붙인다.
 
 ```
@@ -87,7 +87,7 @@ python telegram_send.py album 1.png 2.png   # 앨범(캡션 없음)
 | 3 | WTI·브렌트·두바이 (올해 1월~) | 페트로넷 일일국제원유가격: 두바이 현물, 브렌트 ICE 선물, WTI NYMEX 선물. 캡션에 브렌트 현물 프리미엄(FRED DCOILBRENTEU − 브렌트 선물, 공통 최근일) | WTI Yahoo CL=F, 브렌트 Yahoo BZ=F, 두바이 FRED POILDUBUSDM(IMF 월평균) |
 | 4 | 미 가솔린 소매가격 (2022-01~) | FRED GASREGW | 없음 |
 | 5 | DTCR(좌)·NVDA(우) (2023-01~) | Yahoo(yfinance) | stooq |
-| 6 | IBB·SOX 연초=100 | Yahoo(yfinance) | stooq |
+| 6 | IBB·SOXX(반도체 ETF) 연초=100 | Yahoo(yfinance) | stooq |
 
 ### 실행
 
