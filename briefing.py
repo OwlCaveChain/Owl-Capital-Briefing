@@ -24,16 +24,76 @@ import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-import blog_feed
-import dashboard
-import data_merge
-import fear_greed
-import finviz_heatmap
-import memory
-import natgas
-from briefing_common import OUT_DIR, ROOT, now_kst, prepare_safely, send_messages, setup_korean_font
-from telegram_send import TelegramError, check, enabled
+# ---------------------------------------------------------------------------
+# 실행 환경 점검(표준 라이브러리만 사용, 다른 모듈을 가져오기 전에)
+# 'python' 이 의존 패키지가 없는 인터프리터를 가리키면, 패키지가 있는 다른 python3 로 다시 실행한다.
+# 그런 인터프리터가 없으면 지금 인터프리터에 requirements.txt 를 설치한다.
+# ---------------------------------------------------------------------------
+
+REQUIRED = ("requests", "pandas", "matplotlib", "yfinance", "PIL")
+_CHECK = "import " + ", ".join(REQUIRED)
+
+
+def _missing() -> list[str]:
+    import importlib.util
+
+    return [m for m in REQUIRED if importlib.util.find_spec(m) is None]
+
+
+def ensure_dependencies() -> None:
+    missing = _missing()
+    if not missing:
+        return
+    me = os.path.realpath(sys.executable)
+    print(f"[경고] {sys.executable}(Python {sys.version.split()[0]})에 {', '.join(missing)} 없음", file=sys.stderr)
+    if os.environ.get("OWL_BRIEFING_REEXEC") != "1":
+        import shutil
+
+        names = ["python3"] + [f"python3.{v}" for v in range(14, 9, -1)]
+        cands = [shutil.which(n) for n in names] + [f"/usr/bin/{n}" for n in names] + \
+                [f"/usr/local/bin/{n}" for n in names]
+        seen = {me}
+        for c in cands:
+            if not c or not os.path.exists(c) or os.path.realpath(c) in seen:
+                continue
+            seen.add(os.path.realpath(c))
+            try:
+                ok = subprocess.run([c, "-c", _CHECK], capture_output=True, timeout=60).returncode == 0
+            except Exception:  # noqa: BLE001
+                ok = False
+            if ok:
+                print(f"[경고] 패키지가 있는 {c} 로 다시 실행합니다", file=sys.stderr)
+                sys.stderr.flush()
+                sys.stdout.flush()
+                os.execve(c, [c, os.path.abspath(__file__), *sys.argv[1:]],
+                          {**os.environ, "OWL_BRIEFING_REEXEC": "1"})
+    if os.environ.get("OWL_BRIEFING_INSTALLED") == "1":
+        sys.exit(f"[briefing] 의존 패키지 설치 실패: {', '.join(missing)}. 브리핑을 보내지 못했습니다.")
+    req = Path(__file__).resolve().parent / "requirements.txt"
+    print(f"[경고] 패키지가 있는 python3 를 찾지 못해 {sys.executable} 에 requirements.txt 설치", file=sys.stderr)
+    base = [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)]
+    for extra in ([], ["--break-system-packages"], ["--user", "--break-system-packages"]):
+        if subprocess.run(base + extra, timeout=600).returncode == 0:
+            break
+    # 새로 생긴 site-packages 폴더는 재시작해야 sys.path 에 잡힌다
+    sys.stderr.flush()
+    sys.stdout.flush()
+    os.execve(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]],
+              {**os.environ, "OWL_BRIEFING_REEXEC": "1", "OWL_BRIEFING_INSTALLED": "1"})
+
+ensure_dependencies()
+
+import blog_feed  # noqa: E402
+import dashboard  # noqa: E402
+import data_merge  # noqa: E402
+import fear_greed  # noqa: E402
+import finviz_heatmap  # noqa: E402
+import memory  # noqa: E402
+import natgas  # noqa: E402
+from briefing_common import OUT_DIR, ROOT, now_kst, prepare_safely, send_messages, setup_korean_font  # noqa: E402
+from telegram_send import TelegramError, check, enabled  # noqa: E402
 
 # 차트(5) 앞에 보내는 항목. 0 = 아침 대시보드·섹터 전체표(메시지 1 앞)
 ITEMS = [(0, dashboard), (1, fear_greed), (2, blog_feed), (3, finviz_heatmap), (4, natgas)]
