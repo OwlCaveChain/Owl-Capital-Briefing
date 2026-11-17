@@ -28,26 +28,71 @@ from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # 실행 환경 점검(표준 라이브러리만 사용, 다른 모듈을 가져오기 전에)
-# 'python' 이 의존 패키지가 없는 인터프리터를 가리키면, 패키지가 있는 다른 python3 로 다시 실행한다.
+# 'python' 이 의존 패키지를 못 불러오는 인터프리터를 가리키면, 불러올 수 있는 다른 python3 로 다시 실행한다.
 # 그런 인터프리터가 없으면 지금 인터프리터에 requirements.txt 를 설치한다.
+# 폴더만 있고 불러오지 못하는 패키지(다른 파이썬 버전용으로 설치된 Pillow 등)를 잡으려고
+# 설치 여부가 아니라 실제 import 를 별도 프로세스에서 해 본다.
 # ---------------------------------------------------------------------------
 
-REQUIRED = ("requests", "pandas", "matplotlib", "yfinance", "PIL")
-_CHECK = "import " + ", ".join(REQUIRED)
+# 모듈 이름: (실제로 해 볼 import 문, pip 패키지 이름)
+REQUIRED = {
+    "requests": ("import requests", "requests"),
+    "pandas": ("import pandas", "pandas"),
+    "PIL": ("from PIL import Image, ImageDraw, ImageFont", "pillow"),
+    "matplotlib": ("import matplotlib.pyplot", "matplotlib"),
+    "yfinance": ("import yfinance", "yfinance"),
+}
+_CHECK = (
+    "import os, sys\n"
+    "os.environ.setdefault('MPLBACKEND', 'Agg')\n"
+    "bad = []\n"
+    "for name, stmt in %r:\n"
+    "    try:\n"
+    "        exec(stmt)\n"
+    "    except Exception as e:\n"
+    "        bad.append(name + '\\t' + type(e).__name__ + ': ' + str(e)[:150].replace('\\n', ' '))\n"
+    "print('\\n'.join(bad))\n"
+    "sys.exit(1 if bad else 0)\n"
+) % ([(k, v[0]) for k, v in REQUIRED.items()],)
 
 
-def _missing() -> list[str]:
-    import importlib.util
+def _broken(python: str) -> dict[str, str] | None:
+    """python 으로 의존 패키지를 실제로 불러와 본다. {못 불러온 모듈: 사유}. 실행 자체가 안 되면 None."""
+    try:
+        p = subprocess.run([python, "-c", _CHECK], capture_output=True, text=True, timeout=180)
+    except Exception:  # noqa: BLE001
+        return None
+    if p.returncode == 0:
+        return {}
+    bad = dict(ln.split("\t", 1) for ln in p.stdout.splitlines() if "\t" in ln)
+    return bad or None
 
-    return [m for m in REQUIRED if importlib.util.find_spec(m) is None]
+
+def _pip(args: list[str]) -> bool:
+    """pip install 을 시스템 보호 설정에 맞춰 차례로 시도한다."""
+    base = [sys.executable, "-m", "pip", "install", "-q", *args]
+    for extra in ([], ["--break-system-packages"], ["--user", "--break-system-packages"]):
+        try:
+            if subprocess.run(base + extra, timeout=600).returncode == 0:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
+
+
+def _restart(python: str, **env: str) -> None:
+    sys.stderr.flush()
+    sys.stdout.flush()
+    os.execve(python, [python, os.path.abspath(__file__), *sys.argv[1:]], {**os.environ, **env})
 
 
 def ensure_dependencies() -> None:
-    missing = _missing()
-    if not missing:
+    broken = _broken(sys.executable)
+    if broken == {}:
         return
     me = os.path.realpath(sys.executable)
-    print(f"[경고] {sys.executable}(Python {sys.version.split()[0]})에 {', '.join(missing)} 없음", file=sys.stderr)
+    detail = "; ".join(f"{m}({why})" for m, why in (broken or {"?": "점검 실행 실패"}).items())
+    print(f"[경고] {sys.executable}(Python {sys.version.split()[0]})에서 못 불러옴: {detail}", file=sys.stderr)
     if os.environ.get("OWL_BRIEFING_REEXEC") != "1":
         import shutil
 
@@ -59,29 +104,23 @@ def ensure_dependencies() -> None:
             if not c or not os.path.exists(c) or os.path.realpath(c) in seen:
                 continue
             seen.add(os.path.realpath(c))
-            try:
-                ok = subprocess.run([c, "-c", _CHECK], capture_output=True, timeout=60).returncode == 0
-            except Exception:  # noqa: BLE001
-                ok = False
-            if ok:
-                print(f"[경고] 패키지가 있는 {c} 로 다시 실행합니다", file=sys.stderr)
-                sys.stderr.flush()
-                sys.stdout.flush()
-                os.execve(c, [c, os.path.abspath(__file__), *sys.argv[1:]],
-                          {**os.environ, "OWL_BRIEFING_REEXEC": "1"})
+            if _broken(c) == {}:
+                print(f"[경고] 패키지를 모두 불러오는 {c} 로 다시 실행합니다", file=sys.stderr)
+                _restart(c, OWL_BRIEFING_REEXEC="1")
     if os.environ.get("OWL_BRIEFING_INSTALLED") == "1":
-        sys.exit(f"[briefing] 의존 패키지 설치 실패: {', '.join(missing)}. 브리핑을 보내지 못했습니다.")
+        sys.exit(f"[briefing] 의존 패키지 설치 실패: {detail}. 브리핑을 보내지 못했습니다.")
     req = Path(__file__).resolve().parent / "requirements.txt"
-    print(f"[경고] 패키지가 있는 python3 를 찾지 못해 {sys.executable} 에 requirements.txt 설치", file=sys.stderr)
-    base = [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)]
-    for extra in ([], ["--break-system-packages"], ["--user", "--break-system-packages"]):
-        if subprocess.run(base + extra, timeout=600).returncode == 0:
-            break
+    print(f"[경고] 쓸 수 있는 python3 를 찾지 못해 {sys.executable} 에 requirements.txt 설치", file=sys.stderr)
+    _pip(["-r", str(req)])
+    # 폴더는 있는데 못 불러오는 패키지는 pip 이 "이미 설치됨"으로 넘어가므로, 이 파이썬용으로 강제로 다시 받는다
+    still = _broken(sys.executable)
+    if still:
+        pkgs = [REQUIRED[m][1] for m in still if m in REQUIRED]
+        print(f"[경고] 설치 뒤에도 못 불러옴: {', '.join(still)} → {' '.join(pkgs)} 강제 재설치", file=sys.stderr)
+        _pip(["--ignore-installed", "--no-deps", *pkgs])
     # 새로 생긴 site-packages 폴더는 재시작해야 sys.path 에 잡힌다
-    sys.stderr.flush()
-    sys.stdout.flush()
-    os.execve(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]],
-              {**os.environ, "OWL_BRIEFING_REEXEC": "1", "OWL_BRIEFING_INSTALLED": "1"})
+    _restart(sys.executable, OWL_BRIEFING_REEXEC="1", OWL_BRIEFING_INSTALLED="1")
+
 
 ensure_dependencies()
 
